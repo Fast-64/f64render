@@ -52,11 +52,12 @@ OTHERMODE_H_ATTRS = [
 DRAW_FLAG_TEX0_MONO    = (1 << 1)
 DRAW_FLAG_TEX1_MONO    = (1 << 2)
 DRAW_FLAG_DECAL        = (1 << 3)
-DRAW_FLAG_ALPHA_BLEND  = (1 << 4)
-DRAW_FLAG_TEX0_4BIT    = (1 << 5)
-DRAW_FLAG_TEX1_4BIT    = (1 << 6)
-DRAW_FLAG_TEX0_3BIT    = (1 << 7)
-DRAW_FLAG_TEX1_3BIT    = (1 << 8)
+DRAW_FLAG_ZTEST        = (1 << 4)
+DRAW_FLAG_ALPHA_BLEND  = (1 << 5)
+DRAW_FLAG_TEX0_4BIT    = (1 << 6)
+DRAW_FLAG_TEX1_4BIT    = (1 << 7)
+DRAW_FLAG_TEX0_3BIT    = (1 << 8)
+DRAW_FLAG_TEX1_3BIT    = (1 << 9)
 
 @dataclass
 class F64Material:
@@ -80,12 +81,15 @@ class F64Material:
     blender: tuple = None
     tile_conf: np.ndarray = None
     cull: str = 'NONE'
+    blend: str = 'NONE'
+    depth_test: str = 'LESS_EQUAL'
+    depth_write: bool = True
     flags: int = 0
     geo_mode: int = 0
     othermode_l: int = 0
     othermode_h: int = 0
     alphaClip: float = -1.0
-    queue: int = 0
+    layer: int = 0
     tex0Buff: gpu.types.GPUTexture = None
     tex1Buff: gpu.types.GPUTexture = None
 
@@ -104,29 +108,31 @@ def node_material_parse(mat: bpy.types.Material) -> F64Material:
 # @TODO: re-use fast64 logic
 def f64_parse_blend_mode(f3d_mat: any, f64mat: F64Material) -> str:
   f64mat.alphaClip = -1
+  f64mat.blend = "NONE"
   is_one_cycle = f3d_mat.rdp_settings.g_mdsft_cycletype == "G_CYC_1CYCLE"
 
-  if f3d_mat.rdp_settings.set_rendermode:
-    if f3d_mat.rdp_settings.cvg_x_alpha:
-        f64mat.alphaClip = 0.49
-    elif (
-        is_one_cycle
-        and f3d_mat.rdp_settings.force_bl
-        and f3d_mat.rdp_settings.blend_p1 == "G_BL_CLR_IN"
-        and f3d_mat.rdp_settings.blend_a1 == "G_BL_A_IN"
-        and f3d_mat.rdp_settings.blend_m1 == "G_BL_CLR_MEM"
-        and f3d_mat.rdp_settings.blend_b1 == "G_BL_1MA"
-    ):
-        f64mat.flags |= DRAW_FLAG_ALPHA_BLEND
-    elif (
-        not is_one_cycle
-        and f3d_mat.rdp_settings.force_bl
-        and f3d_mat.rdp_settings.blend_p2 == "G_BL_CLR_IN"
-        and f3d_mat.rdp_settings.blend_a2 == "G_BL_A_IN"
-        and f3d_mat.rdp_settings.blend_m2 == "G_BL_CLR_MEM"
-        and f3d_mat.rdp_settings.blend_b2 == "G_BL_1MA"
-    ):
-        f64mat.flags |= DRAW_FLAG_ALPHA_BLEND
+  if f3d_mat.rdp_settings.cvg_x_alpha:
+    f64mat.alphaClip = 0.49
+  elif (
+    is_one_cycle
+    and f3d_mat.rdp_settings.force_bl
+    and f3d_mat.rdp_settings.blend_p1 == "G_BL_CLR_IN"
+    and f3d_mat.rdp_settings.blend_a1 == "G_BL_A_IN"
+    and f3d_mat.rdp_settings.blend_m1 == "G_BL_CLR_MEM"
+    and f3d_mat.rdp_settings.blend_b1 == "G_BL_1MA"
+  ):
+    f64mat.blend = "ALPHA"
+    f64mat.flags |= DRAW_FLAG_ALPHA_BLEND
+  elif (
+    not is_one_cycle
+    and f3d_mat.rdp_settings.force_bl
+    and f3d_mat.rdp_settings.blend_p2 == "G_BL_CLR_IN"
+    and f3d_mat.rdp_settings.blend_a2 == "G_BL_A_IN"
+    and f3d_mat.rdp_settings.blend_m2 == "G_BL_CLR_MEM"
+    and f3d_mat.rdp_settings.blend_b2 == "G_BL_1MA"
+  ):
+    f64mat.blend = "ALPHA"
+    f64mat.flags |= DRAW_FLAG_ALPHA_BLEND
 
 def f64_material_parse(f3d_mat: any, prev_f64mat: F64Material) -> F64Material:
   from fast64_internal.utility import s_rgb_alpha_1_tuple, gammaCorrect
@@ -178,11 +184,18 @@ def f64_material_parse(f3d_mat: any, prev_f64mat: F64Material) -> F64Material:
   othermode_h |= getattr(gbi, get_textlut_mode(f3d_mat))
   f64mat.geo_mode, f64mat.othermode_l, f64mat.othermode_h = geo_mode, othermode_l, othermode_h
   
-  if f3d_mat.draw_layer.oot == 'Transparent' or f3d_mat.draw_layer.sm64 in ['5', '6','7']:
-    f64mat.queue = 1
+  game_mode = bpy.context.scene.gameEditorMode
+  f64mat.layer = getattr(f3d_mat.draw_layer, game_mode.lower(), None)
 
   if f3d_mat.rdp_settings.zmode == 'ZMODE_DEC':
     f64mat.flags |= DRAW_FLAG_DECAL
+
+  if not f3d_mat.rdp_settings.z_cmp:
+    f64mat.depth_test = 'NONE'
+  else:
+    f64mat.flags |= DRAW_FLAG_ZTEST
+
+  f64mat.depth_write = f3d_mat.rdp_settings.z_upd
 
   # Note: doing 'gpu.texture.from_image' seems to cost nothing, caching is not needed
   if f3d_mat.tex0.tex_set:

@@ -18,7 +18,7 @@ class MeshBuffers:
     indices: np.ndarray # global index array, sorted by material
     index_offsets: np.ndarray # offsets for each material in the index array
   # render data:
-    batch: gpu.types.GPUBatch
+    batch: list[gpu.types.GPUBatch]|gpu.types.GPUBatch
     mat_data: list[np.ndarray]
     ubo_mat_data: list[gpu.types.GPUUniformBuf]
     materials: list[F64Material] = None
@@ -28,16 +28,18 @@ class MeshBuffers:
 # Note that this can be a slow process, so it should be cached externally
 # This will only handle mesh data itself, materials are not read out here
 def mesh_to_buffers(mesh: bpy.types.Mesh) -> MeshBuffers:
+  from fast64_internal.f3d.f3d_writer import getColorLayer
+
   tDes = time.process_time()
   mesh.calc_loop_triangles()
 
   # Here we want to transform all attributes into un-indexed arrays of per-vertex data
   # Position + normals are stored per vertex (indexed), colors and uvs are stored per face-corner
   # All need to be normalized to the same length
-  
-  color_layer = mesh.color_attributes.get("Col")
-  alpha_layer = mesh.color_attributes.get("Alpha")
-  uv_layer = mesh.uv_layers.active.data if mesh.uv_layers.active else None
+
+  uv_layer = mesh.uv_layers.get("UVMap", mesh.uv_layers.active)
+  if uv_layer is not None:
+    uv_layer = uv_layer.data
 
   num_corners = len(mesh.loop_triangles) * 3
   # print("Faces: ", num_corners, color_layer)
@@ -56,29 +58,47 @@ def mesh_to_buffers(mesh: bpy.types.Mesh) -> MeshBuffers:
   positions = tmp_vec3[indices]
 
   # read normals (these contain pre-calculated normals handling  flat, smooth, custom split normals)
-  corner_norm = np.empty((len(mesh.corner_normals), 3), dtype=np.float32)
-  mesh.corner_normals.foreach_get('vector', corner_norm.ravel())
+  if bpy.app.version < (3, 6, 0):
+      mesh.calc_normals_split()
+      corner_norm = np.empty((len(mesh.loops) * 3, 3), dtype=np.float32)
+      mesh.loops.foreach_get('normal', corner_norm)
+  else:
+    corner_norm = np.empty((len(mesh.corner_normals), 3), dtype=np.float32)
+    mesh.corner_normals.foreach_get('vector', corner_norm.ravel())
 
   mesh.loop_triangles.foreach_get('loops', indices)
   normals = corner_norm[indices]
   
-  if uv_layer: 
-    uv_layer.foreach_get('uv', uvs.ravel())
-    uvs = uvs[indices]
+  if uv_layer is not None: 
+    corner_uvs = np.empty((len(uv_layer), 2), dtype=np.float32)
+    uv_layer.foreach_get('uv', corner_uvs.ravel())
+    uvs = corner_uvs[indices]
   else:
     uvs.fill(0.0)
 
-  if color_layer:
-    colors_tmp = np.empty((len(color_layer.data), 4), dtype=np.float32)
-    color_layer.data.foreach_get('color_srgb', colors_tmp.ravel())
+  # HACK: color and alpha layer must be read after the other is used, old blends break otherwise?
+  color_layer = getColorLayer(mesh, layer="Col")
+  if color_layer is not None:
+    colors_tmp = np.empty((len(color_layer), 4), dtype=np.float32)
+    if bpy.app.version > (3, 2, 0):
+      color_layer.foreach_get('color_srgb', colors_tmp.ravel())
+    else: # vectorized linear -> sRGB conversion
+      color_layer.foreach_get('color', colors_tmp.ravel())
+      mask = colors_tmp > 0.0031308
+      colors_tmp[mask] = 1.055 * (np.power(colors_tmp[mask], (1.0 / 2.4))) - 0.055
+      colors_tmp[~mask] *= 12.92
     colors = colors_tmp[indices]
-
-    if alpha_layer:
-      alpha_layer.data.foreach_get('color', colors_tmp.ravel())
-      colors[:, 3] = colors_tmp[indices, 0]
 
   else:
     colors.fill(1.0)
+
+  alpha_layer = getColorLayer(mesh, layer="Alpha")
+  if alpha_layer is not None:
+    alpha_tmp = np.empty((len(alpha_layer), 4), dtype=np.float32)
+    alpha_layer.foreach_get('color', alpha_tmp.ravel())
+    colors[:, 3] = alpha_tmp[indices, 0] # TODO: use blender lum convert to match exports?
+  else:
+    colors[:, 3] = 1.0
 
   # create map of hidden polygons (we need to map that to triangles)
   poly_hidden = np.empty(len(mesh.polygons), dtype=np.int32)
@@ -104,7 +124,7 @@ def mesh_to_buffers(mesh: bpy.types.Mesh) -> MeshBuffers:
   index_array = index_array[np.argsort(mat_indices)] # sort index_array by value in use_flat (aka material-index)
   index_offsets = np.bincount(mat_indices, minlength=mat_count)    # now get counts of each material, e.g.: [1, 2] where index is material-index
   index_offsets = np.insert(index_offsets, 0, 0)  # prepend 0 to turn counts into offsets
-  index_offsets = np.cumsum(index_offsets) * 3    # converted into accumulated offset / mul. by 3 for triangles
+  index_offsets = np.cumsum(index_offsets)   # converted into accumulated offset
 
   print(" - Mesh", (time.process_time() - tDes) * 1000)
 

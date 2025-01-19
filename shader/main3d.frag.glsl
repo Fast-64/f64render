@@ -116,7 +116,7 @@ vec4 cc_clampValue(in vec4 value)
   return clamp(value, 0.0, 1.0);
 }
 
-
+#ifdef BLEND_EMULATION
 vec4 blender_fetch(
   in int val, in vec4 colorBlend, in vec4 colorFog, in vec4 colorFB, in vec4 colorCC,
   in vec4 blenderA
@@ -172,7 +172,7 @@ bool color_depth_blending(
   if((DRAW_FLAGS & DRAW_FLAG_DECAL) != 0) {
     depthTest = depthDiff <= DECAL_DEPTH_DELTA;
   }
-    
+
   oldColorInt = imageLoad(color_texture, screenPosPixel).r;
   vec4 oldColor = unpackUnorm4x8(oldColorInt);
   oldColor.a = 0.0;
@@ -188,6 +188,7 @@ bool color_depth_blending(
   if(shouldDiscard)oldColorInt = writeColor;
   return shouldDiscard;
 }
+#endif
 
 void main()
 {
@@ -253,6 +254,8 @@ void main()
   ccValue = cc_clampValue(cc_overflowValue(ccValue));
   ccValue.rgb = gammaToLinear(ccValue.rgb);
 
+  bool alphaTestFailed = ccValue.a < ALPHA_CLIP;
+#ifdef BLEND_EMULATION
   // Depth / Decal handling:
   // We manually write & check depth values in an image in addition to the actual depth buffer.
   // This allows us to do manual compares (e.g. decals) and discard fragments based on that.
@@ -270,7 +273,6 @@ void main()
     writeDepth = -0xFFFFFF;
   }
 
-  bool alphaTestFailed = ccValue.a < ALPHA_CLIP;
   if(alphaTestFailed)writeDepth = -0xFFFFFF;
 
   #ifdef USE_SHADER_INTERLOCK
@@ -308,4 +310,11 @@ void main()
   // but it will result in incoherent results (e.g. blocky artifacts due to depth related race-conditions)
   // This is most prominent on decals.
   discard;
+#else
+  if (alphaTestFailed) discard;
+  if((DRAW_FLAGS & DRAW_FLAG_ALPHA_BLEND) == 0) {
+    FragColor.a = 1.0;
+  }
+  FragColor = ccValue;
+#endif
 }
