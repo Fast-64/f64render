@@ -254,8 +254,6 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
       self.depth_texture.clear(format='INT', value=[0])
 
     self.init_shader()
-    if self.shader_info_img_impl:
-      self.init_shader_2d()
     self.shader.bind()
 
     # Enable depth test
@@ -374,12 +372,14 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
           indices_count = (render_obj.index_offsets[i+1] - render_obj.index_offsets[i]) * 3
           if indices_count == 0: # ignore unused materials
             continue
-          
+
           f3d_mat = slot.material.f3d_mat                    
           if f64render_materials_dirty or render_obj.materials[i] is None:
             render_obj.materials[i] = f64_material_parse(f3d_mat, render_obj.materials[i])
 
           f64mat = render_obj.materials[i]
+          if f64mat.cull == "BOTH":
+            continue
           obj_queue = render_queue.setdefault(f64mat.layer, {})
           info = obj_queue.setdefault(
             obj, TempObjRenderInfo(mvp_matrix, normal_matrix, render_obj, [])
@@ -495,6 +495,9 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     gpu.state.blend_set("ALPHA")
     gpu.state.depth_test_set('LESS')
     gpu.state.depth_mask_set(False)
+
+    if self.shader_info_img_impl:
+      self.init_shader_2d()
 
     self.shader_2d.bind()
     

@@ -52,12 +52,11 @@ OTHERMODE_H_ATTRS = [
 DRAW_FLAG_TEX0_MONO    = (1 << 1)
 DRAW_FLAG_TEX1_MONO    = (1 << 2)
 DRAW_FLAG_DECAL        = (1 << 3)
-DRAW_FLAG_ZTEST        = (1 << 4)
-DRAW_FLAG_ALPHA_BLEND  = (1 << 5)
-DRAW_FLAG_TEX0_4BIT    = (1 << 6)
-DRAW_FLAG_TEX1_4BIT    = (1 << 7)
-DRAW_FLAG_TEX0_3BIT    = (1 << 8)
-DRAW_FLAG_TEX1_3BIT    = (1 << 9)
+DRAW_FLAG_ALPHA_BLEND  = (1 << 4)
+DRAW_FLAG_TEX0_4BIT    = (1 << 5)
+DRAW_FLAG_TEX1_4BIT    = (1 << 6)
+DRAW_FLAG_TEX0_3BIT    = (1 << 7)
+DRAW_FLAG_TEX1_3BIT    = (1 << 8)
 
 @dataclass
 class F64Material:
@@ -164,7 +163,8 @@ def f64_material_parse(f3d_mat: any, prev_f64mat: F64Material) -> F64Material:
   f64mat.color_env.append(f3d_mat.env_color[3])
 
   if f3d_mat.rdp_settings.g_cull_back: f64mat.cull = "BACK"
-  if f3d_mat.rdp_settings.g_cull_front: f64mat.cull = "FRONT"
+  if f3d_mat.rdp_settings.g_cull_front: 
+    f64mat.cull = "BOTH" if f64mat.cull == "BACK" else "FRONT"
   
   f64_parse_blend_mode(f3d_mat, f64mat)
 
@@ -188,12 +188,8 @@ def f64_material_parse(f3d_mat: any, prev_f64mat: F64Material) -> F64Material:
   f64mat.layer = getattr(f3d_mat.draw_layer, game_mode.lower(), None)
 
   if f3d_mat.rdp_settings.zmode == 'ZMODE_DEC':
+    f64mat.depth_test = 'EQUAL'
     f64mat.flags |= DRAW_FLAG_DECAL
-
-  if not f3d_mat.rdp_settings.z_cmp:
-    f64mat.depth_test = 'NONE'
-  else:
-    f64mat.flags |= DRAW_FLAG_ZTEST
 
   f64mat.depth_write = f3d_mat.rdp_settings.z_upd
 
