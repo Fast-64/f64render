@@ -313,7 +313,7 @@ void main()
 #else
   if (alphaTestFailed) discard;
   if((DRAW_FLAGS & DRAW_FLAG_ALPHA_BLEND) == 0) {
-    FragColor.a = 1.0;
+    ccValue.a = 1.0;
   }
   FragColor = ccValue;
 #endif
