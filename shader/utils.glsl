@@ -20,6 +20,8 @@ vec3 linearToGamma(in vec3 color)
 #define cycleType() (OTHER_MODE_H & (3 << G_MDSFT_CYCLETYPE))
 #define texFilter() (OTHER_MODE_H & (3 << G_MDSFT_TEXTFILT))
 #define textPersp() (OTHER_MODE_H & (1 << G_MDSFT_TEXTPERSP))
+#define textLOD()   (OTHER_MODE_H & (1 << G_MDSFT_TEXTLOD))
+#define textDetail()(OTHER_MODE_H & (3 << G_MDSFT_TEXTDETAIL))
 
 #define boolSelect(cond, a, b) (bool(mix(a, b, cond)))
 
@@ -52,4 +54,17 @@ vec4 wrappedMirrorSample(const sampler2D tex, ivec2 uv, const vec2 mask, const v
   uv.y = texSize.y - uv.y - 1; // invert Y back
 
   return texelFetch(tex, uv, 0);
+}
+
+const sampler2D getTextureSampler(in const uint textureIndex) {
+  switch (textureIndex) {
+    default: return tex0;
+    case 1: return tex1;
+    case 2: return tex2;
+    case 3: return tex3;
+    case 4: return tex4;
+    case 5: return tex5;
+    case 6: return tex6;
+    case 7: return tex7;
+  }
 }

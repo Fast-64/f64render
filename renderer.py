@@ -43,9 +43,8 @@ UNIFORM_BUFFER_STRUCT = struct.Struct(
   "16i"                             # color-combiner settings
   "i i i i"                         # geoMode, other-low, other-high, flags
   "4f 4f 4f 4f"                     # prim, prim_lod, prim-depth, env, ambient
-  "3f f 3f i 3f"                    # ck center, alpha clip, ck scale, light count, width,
-  "i"                               # uv basis
-  "6f"                              # k0-k5
+  "3f f 3f i 3f i"                  # ck center, alpha clip, ck scale, light count, width, uv basis
+  "6f i 4x"                         # k0-k5, mipmap count, padding
 )
 
 def get_struct_ubo_size(s: struct.Struct):
@@ -76,7 +75,7 @@ def get_scene_render_state(scene: bpy.types.Scene):
     ambient_color=quantize_srgb(fast64_rs.ambientColor, force_alpha=True),
     light_count=2,
     prim_color=quantize_srgb(f64render_rs.default_prim_color),
-    prim_lod=(f64render_rs.default_lod_min, f64render_rs.default_lod_frac),
+    prim_lod=(f64render_rs.default_lod_frac, f64render_rs.default_lod_min),
     env_color=quantize_srgb(f64render_rs.default_env_color),
     ck=tuple((*quantize_srgb(f64render_rs.default_key_center, False), *f64render_rs.default_key_scale, *f64render_rs.default_key_width)),
     convert=quantize_tuple(f64render_rs.default_convert, 9.0, -1.0, 1.0),
@@ -244,6 +243,9 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
       # for cleaner and faster code
       shader_info.define("VIEWSPACE_LIGHTING", "0" if self.world_lighting else "1")
       shader_info.define("SIMULATE_LOW_PRECISION", "1")
+      ext_list = gpu.capabilities.extensions_get()
+      if "GL_ARB_derivative_control" in ext_list:
+        shader_info.define("DERIVATIVE_CONTROL", "1")
 
       shader_info.push_constant("MAT4", "matMVP")
       shader_info.push_constant("MAT3", "matNorm")
@@ -564,6 +566,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
           *render_state.ck[6:9],
           f64mat.uv_basis,
           *render_state.convert,
+          f64mat.mip_count
         )
         
         info.render_obj.ubo_mat_data[mat_idx].update(info.render_obj.mat_data[mat_idx])                        

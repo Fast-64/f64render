@@ -219,6 +219,7 @@ class F64Material:
   prim_depth: tuple[float, float] = (0, 0)
   layer: int = 0
   uv_basis: int = 0
+  mip_count: int = 0
 
 def quantize_direction(direction):
   return tuple(quantize(x, 8, -1, 1) for x in direction)
@@ -244,7 +245,7 @@ def f64_material_parse(f3d_mat: any, always_set: bool, set_light_dir: bool) -> F
   if always_set or f3d_mat.set_combiner: state.cc = get_cc_settings(f3d_mat)
   if always_set or (f3d_mat.set_prim and cc_uses['Primitive']): 
     state.prim_color = quantize_srgb(f3d_mat.prim_color)
-    state.prim_lod = (f3d_mat.prim_lod_min, f3d_mat.prim_lod_frac)
+    state.prim_lod = (f3d_mat.prim_lod_frac, f3d_mat.prim_lod_min)
   if always_set or (f3d_mat.set_env and cc_uses['Environment']): 
     state.env_color = quantize_srgb(f3d_mat.env_color)
   if always_set or (f3d_mat.set_key and cc_uses['Key']): # extra 0 for alignment
@@ -268,8 +269,7 @@ def f64_material_parse(f3d_mat: any, always_set: bool, set_light_dir: bool) -> F
         f64_parse_obj_light(f64_light, obj, set_light_dir)
         light_index += 1
       state.light_count = light_index
-  
-  f64mat.prim_depth = (rdp.prim_depth.z, rdp.prim_depth.dz)
+
   if rdp.g_cull_back: f64mat.cull = "BACK"
   if rdp.g_cull_front: 
     f64mat.cull = "BOTH" if f64mat.cull == "BACK" else "FRONT"
@@ -278,7 +278,11 @@ def f64_material_parse(f3d_mat: any, always_set: bool, set_light_dir: bool) -> F
   if use_tex0: state.tex_confs[0] = get_tile_conf(f3d_mat.tex0)
   if use_tex1: state.tex_confs[1] = get_tile_conf(f3d_mat.tex1)
   # TODO: use check for multitex function in glTF pr?
-  if use_tex0 and use_tex1: f64mat.uv_basis = int(f3d_mat.uv_basis.removeprefix("TEXEL"))
+  if use_tex0 and use_tex1: 
+    f64mat.uv_basis = int(f3d_mat.uv_basis.removeprefix("TEXEL"))
+
+  if cc_uses["Texture 0"] and cc_uses["Texture 1"]: f64mat.mip_count = f3d_mat.rdp_settings.num_textures_mipmapped - 1
+  f64mat.prim_depth = (rdp.prim_depth.z, rdp.prim_depth.dz)
   
   from fast64_internal.f3d.f3d_gbi import get_F3D_GBI
   from fast64_internal.f3d.f3d_material import get_textlut_mode

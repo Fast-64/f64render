@@ -3,6 +3,9 @@
   #extension GL_ARB_fragment_shader_interlock : enable
   layout(pixel_interlock_unordered) in;
 #endif
+#ifdef GL_ARB_derivative_control
+  #extension GL_ARB_derivative_control : enable
+#endif
 
 #define DECAL_DEPTH_DELTA 100
 
@@ -14,7 +17,7 @@ vec4 quantize4Bit(in vec4 color) {
   return round(color * 16.0) / 16.0; // (16 seems more accurate than 15)
 }
 
-vec4 quantizeTexture(int flags, vec4 color) {
+vec4 quantizeTexture(uint flags, vec4 color) {
   vec4 colorQuant = flagSelect(flags, TEX_FLAG_4BIT, color, quantize4Bit(color));
   colorQuant = flagSelect(flags, TEX_FLAG_3BIT, colorQuant, quantize3Bit(colorQuant));
   return flagSelect(flags, TEX_FLAG_MONO, colorQuant.rgba, colorQuant.rrrr);
@@ -75,20 +78,49 @@ vec4 sampleSampler(in const sampler2D tex, in const TileConf tileConf, in vec2 u
   }
 }
 
-const sampler2D getTextureSampler(in const uint textureIndex) {
-  switch (textureIndex) {
-    default: return tex0;
-    case 1: return tex1;
-    case 2: return tex2;
-    case 3: return tex3;
-    case 4: return tex4;
-    case 5: return tex5;
-    case 6: return tex6;
-    case 7: return tex7;
-  }
+float computeLOD(inout uint tileIndex0, inout uint tileIndex1) {
+  // https://github.com/rt64/rt64/blob/0ca92eeb6c2f58ce3581c65f87f7261b8ac0fea0/src/shaders/TextureSampler.hlsli#L18
+  if (textLOD() == G_TL_TILE)
+    return 1.0f;
+  const uint texDetail = textDetail();
+  const bool lodSharpen = texDetail == G_TD_SHARPEN;
+  const bool lodDetail = texDetail == G_TD_DETAIL;
+  const bool lodSharpDetail = lodSharpen || lodDetail;
+
+#ifdef GL_ARB_derivative_control // TODO: is dFdxCoarse more accurate than fine?
+  const vec2 dfd = abs(vec2(dFdxCoarse(inputUV.x), dFdyCoarse(inputUV.y)));
+#else
+  const vec2 dfd = abs(vec2(dFdx(inputUV.x), dFdy(inputUV.y)));
+#endif
+  float maxDst = max(dfd.x, dfd.y);
+
+  if (lodSharpDetail) 
+    maxDst = max(maxDst, material.primLod.y);
+
+  int tileBase = int(floor(log2(maxDst)));
+  float lodFraction = maxDst / pow(2, max(tileBase, 0)) - 1.0;
+
+  if (lodSharpen && maxDst < 1.0)
+    lodFraction = maxDst - 1.0;
+
+  if (lodDetail) {
+    if (lodFraction < 0.0)
+      lodFraction = maxDst;
+    tileBase += 1;
+  } else if (tileBase >= material.mipCount)
+    lodFraction = 1.0;
+
+  if (lodSharpDetail) 
+    tileBase = max(tileBase, 0);
+  else 
+    lodFraction = max(lodFraction, 0.0);
+
+  tileIndex0 = clamp(tileBase, 0, material.mipCount);
+  tileIndex1 = clamp(tileBase + 1, 0, material.mipCount);
+  return lodFraction;
 }
 
-vec3 cc_fetchColor(in int val, in vec4 shade, in vec4 comb, in vec4 texData0, in vec4 texData1)
+vec3 cc_fetchColor(in int val, in vec4 shade, in vec4 comb, in float lodFraction, in vec4 texData0, in vec4 texData1)
 {
        if(val == CC_C_COMB       ) return comb.rgb;
   else if(val == CC_C_TEX0       ) return texData0.rgb;
@@ -104,8 +136,8 @@ vec3 cc_fetchColor(in int val, in vec4 shade, in vec4 comb, in vec4 texData0, in
   else if(val == CC_C_PRIM_ALPHA ) return material.prim_color.aaa;
   else if(val == CC_C_SHADE_ALPHA) return linearToGamma(shade.aaa);
   else if(val == CC_C_ENV_ALPHA  ) return material.env.aaa;
-  // else if(val == CC_C_LOD_FRAC   ) return vec3(0.0); // @TODO
-  else if(val == CC_C_PRIM_LOD_FRAC) return vec3(material.primLodDepth[1]);
+  else if(val == CC_C_LOD_FRAC   ) return vec3(lodFraction);
+  else if(val == CC_C_PRIM_LOD_FRAC) return vec3(material.primLod.x);
   else if(val == CC_C_NOISE      ) return vec3(noise(posScreen*0.25));
   else if(val == CC_C_K4         ) return vec3(material.k45[0]);
   else if(val == CC_C_K5         ) return vec3(material.k45[1]);
@@ -122,7 +154,7 @@ float cc_fetchAlpha(in int val, vec4 shade, in vec4 comb, in vec4 texData0, in v
   else if(val == CC_A_SHADE) return shade.a;
   else if(val == CC_A_ENV  ) return material.env.a;
   // else if(val == CC_A_LOD_FRAC) return 0.0; // @TODO
-  else if(val == CC_A_PRIM_LOD_FRAC) return material.primLodDepth[1];
+  else if(val == CC_A_PRIM_LOD_FRAC) return material.primLod.x;
   else if(val == CC_A_1    ) return 1.0;
   return 0.0; // default: CC_A_0
 }
@@ -192,7 +224,7 @@ bool color_depth_blending(
 {
   ivec2 screenPosPixel = ivec2(trunc(gl_FragCoord.xy));
   int oldDepth = imageAtomicMax(depth_texture, screenPosPixel, writeDepth);
-  int depthDiff = int(mixSelect(zSource() == G_ZS_PRIM, abs(oldDepth - currDepth), material.primLodDepth.w));
+  int depthDiff = int(mixSelect(zSource() == G_ZS_PRIM, abs(oldDepth - currDepth), material.primDepth.y));
 
   bool depthTest = currDepth >= oldDepth;
   if((DRAW_FLAGS & DRAW_FLAG_DECAL) != 0) {
@@ -226,19 +258,23 @@ void main()
 
   vec4 ccShade = geoModeSelect(G_SHADE_SMOOTH, cc_shade_flat, cc_shade);
 
-  const vec2 uvCoord = inputUV * textureSize(getTextureSampler(material.uvBasis), 0);
-  vec4 texData0 = sampleSampler(getTextureSampler(0), material.texConfs[0], uvCoord, texFilter);
-  vec4 texData1 = sampleSampler(getTextureSampler(1), material.texConfs[1], uvCoord, texFilter);
+  uint tex0Index = 0;
+  uint tex1Index = 1;
+  const float lodFraction = computeLOD(tex0Index, tex1Index);
 
+  vec4 texData0 = sampleSampler(getTextureSampler(tex0Index), material.texConfs[tex0Index], inputUV, texFilter);
+  vec4 texData1 = sampleSampler(getTextureSampler(tex1Index), material.texConfs[tex1Index], inputUV, texFilter);
+
+  // handle I4/I8
   texData0.rgb = linearToGamma(texData0.rgb);
   texData1.rgb = linearToGamma(texData1.rgb);
 
   // @TODO: emulate other formats, e.g. quantization?
 
-  cc0[0].rgb = cc_fetchColor(material.cc0Color.x, ccShade, ccValue, texData0, texData1);
-  cc0[1].rgb = cc_fetchColor(material.cc0Color.y, ccShade, ccValue, texData0, texData1);
-  cc0[2].rgb = cc_fetchColor(material.cc0Color.z, ccShade, ccValue, texData0, texData1);
-  cc0[3].rgb = cc_fetchColor(material.cc0Color.w, ccShade, ccValue, texData0, texData1);
+  cc0[0].rgb = cc_fetchColor(material.cc0Color.x, ccShade, ccValue, lodFraction, texData0, texData1);
+  cc0[1].rgb = cc_fetchColor(material.cc0Color.y, ccShade, ccValue, lodFraction, texData0, texData1);
+  cc0[2].rgb = cc_fetchColor(material.cc0Color.z, ccShade, ccValue, lodFraction, texData0, texData1);
+  cc0[3].rgb = cc_fetchColor(material.cc0Color.w, ccShade, ccValue, lodFraction, texData0, texData1);
 
   cc0[0].a = cc_fetchAlpha(material.cc0Alpha.x, ccShade, ccValue, texData0, texData1);
   cc0[1].a = cc_fetchAlpha(material.cc0Alpha.y, ccShade, ccValue, texData0, texData1);
@@ -247,11 +283,11 @@ void main()
 
   ccValue = cc_overflowValue((cc0[0] - cc0[1]) * cc0[2] + cc0[3]);
 
-  if(cycleType == G_CYC_2CYCLE) {
-    cc1[0].rgb = cc_fetchColor(material.cc1Color.x, ccShade, ccValue, texData0, texData1);
-    cc1[1].rgb = cc_fetchColor(material.cc1Color.y, ccShade, ccValue, texData0, texData1);
-    cc1[2].rgb = cc_fetchColor(material.cc1Color.z, ccShade, ccValue, texData0, texData1);
-    cc1[3].rgb = cc_fetchColor(material.cc1Color.w, ccShade, ccValue, texData0, texData1);
+  if((OTHER_MODE_H & G_CYC_2CYCLE) != 0) {
+    cc1[0].rgb = cc_fetchColor(material.cc1Color.x, ccShade, ccValue, lodFraction, texData0, texData1);
+    cc1[1].rgb = cc_fetchColor(material.cc1Color.y, ccShade, ccValue, lodFraction, texData0, texData1);
+    cc1[2].rgb = cc_fetchColor(material.cc1Color.z, ccShade, ccValue, lodFraction, texData0, texData1);
+    cc1[3].rgb = cc_fetchColor(material.cc1Color.w, ccShade, ccValue, lodFraction, texData0, texData1);
     
     cc1[0].a = cc_fetchAlpha(material.cc1Alpha.x, ccShade, ccValue, texData0, texData1);
     cc1[1].a = cc_fetchAlpha(material.cc1Alpha.y, ccShade, ccValue, texData0, texData1);
@@ -276,7 +312,7 @@ void main()
   // Note that this fallback can create small artifacts since depth and color are not able to be synchronized together.
   ivec2 screenPosPixel = ivec2(trunc(gl_FragCoord.xy));
 
-  int currDepth = int(mixSelect(zSource() == G_ZS_PRIM, gl_FragCoord.w * 0xFFFFF, material.primLodDepth.z));
+  int currDepth = int(mixSelect(zSource() == G_ZS_PRIM, gl_FragCoord.w * 0xFFFFF, material.primDepth.x));
   int writeDepth = int(drawFlagSelect(DRAW_FLAG_DECAL, currDepth, -0xFFFFFF));
 
   if((DRAW_FLAGS & DRAW_FLAG_ALPHA_BLEND) != 0) {

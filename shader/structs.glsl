@@ -12,7 +12,7 @@ struct TileConf
   vec2 shift;
   vec2 low;
   vec2 high;  // if negative, mirrored, high = abs(high)
-  int flags;  // TODO: correct impl of this would be to process textures ahead of time, but this has to be done in fast64 first
+  uint flags; // TODO: correct impl of this would be to process textures ahead of time, but this has to be done in fast64 first
 };
 
 struct UBO_Material
@@ -30,17 +30,19 @@ struct UBO_Material
   ivec4 modes; // geo, other-low, other-high, flags
 
   vec4 prim_color;
-  vec4 primLodDepth;
+  vec2 primLod; // x is frac, y is min
+  vec2 primDepth;
   vec4 env;
   vec4 ambientColor;
   vec3 ck_center;
   float alphaClip;
   vec3 ck_scale;
-  int numLights;
+  uint numLights;
   vec3 ck_width;
-  int uvBasis;
+  uint uvBasis;
   vec4 k_0123;
   vec2 k45;
+  int mipCount;
 };
 
 #define GEO_MODE     material.modes.x
