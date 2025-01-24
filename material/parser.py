@@ -1,12 +1,36 @@
-from dataclasses import dataclass, field
+import copy
+from dataclasses import dataclass
+import dataclasses
+import functools
 import bpy
+import mathutils
 import numpy as np
 import gpu
 import time
 
 from .tile import get_tile_conf
-from .cc import get_cc_settings
+from .cc import SOLID_CC, get_cc_settings
 from .blender import get_blender_settings
+from ..f64_globals import F64_GLOBALS
+
+@functools.cache
+def quantize(x: float, bits: int, mi=0.0, ma=1.0): # quantize in a range
+  value_count = 2**bits-1
+  range_size = ma - mi
+  return mi + round((x - mi) / range_size * value_count) / value_count * range_size
+
+@functools.cache
+def quantize_srgb_cached(linear_color: tuple, include_alpha: bool, force_alpha: bool):
+  result = list(mathutils.Color(linear_color[:3]).from_scene_linear_to_srgb())
+  if include_alpha or force_alpha:
+    if len(linear_color) > 3 and not force_alpha:
+      result.append(linear_color[3])
+    else:
+      result.append(1.0)
+  return tuple(quantize(x, 8) for x in result)
+
+def quantize_srgb(linear_color, include_alpha=True, force_alpha=True): # caching this makes it basically free in subsequent frames
+  return quantize_srgb_cached(tuple(linear_color), include_alpha, force_alpha)
 
 GEO_MODE_ATTRS = [
   "g_zbuffer",
@@ -59,114 +83,191 @@ DRAW_FLAG_TEX0_3BIT    = (1 << 7)
 DRAW_FLAG_TEX1_3BIT    = (1 << 8)
 
 @dataclass
-class F64Material:
-    color_prim: tuple = field(default_factory=lambda: (1, 1, 1, 1))
-    lod_prim: tuple = field(default_factory=lambda: (0, 0))
-    prim_depth: tuple = field(default_factory=lambda: (0, 0))
-    color_env: tuple = field(default_factory=lambda: (0.5, 0.5, 0.5, 0.5))
-    ck: tuple = field(default_factory=lambda: (0, 0, 0, 0, 0, 0, 0, 0))
-    convert: tuple = field(default_factory=lambda: (0, 0, 0, 0, 0, 0))
-    color_ambient: tuple = None
-    color_light: tuple= None
-    
-    set_prim: bool = False
-    set_env: bool = False
-    set_ck: bool = False
-    set_convert: bool = False
-    set_ambient: bool = False
-    set_light: bool = False
+class RenderMode: # one class for all rendermodes
+  aa_en: bool = False
+  z_cmp: bool = False
+  z_upd: bool = False
+  im_rd: bool = False
+  clr_on_cvg: bool = False
+  cvg_dst: str = "CVG_DST_CLAMP"
+  zmode: str = "ZMODE_OPA"
+  cvg_x_alpha: bool = False
+  alpha_cvg_sel: bool = False
+  force_bl: bool = False
+  blend_cycle1: tuple[str, str, str, str] = ("G_BL_CLR_IN", "G_BL_A_IN", "G_BL_CLR_IN", "G_BL_1MA")
+  blend_cycle2: tuple[str, str, str, str] = ("G_BL_CLR_IN", "G_BL_A_IN", "G_BL_CLR_IN", "G_BL_1MA")
 
-    cc: np.ndarray = None
-    blender: tuple = None
+@functools.cache
+def parse_f3d_rendermode_preset(preset_cycle1: str, preset_cycle2: str|None):
+  # TODO: If/When porting to fast64 reuse this in rendermode_preset_to_advanced (where the logic is sourced)
+  from fast64_internal.f3d.f3d_gbi import get_F3D_GBI
+  f3d = get_F3D_GBI()
+  def get_with_default(preset, default):
+    return getattr(f3d, preset, default)
+
+  if preset_cycle2 is not None:
+      r1 = get_with_default(preset_cycle1, f3d.G_RM_FOG_SHADE_A)
+      r2 = get_with_default(preset_cycle2, f3d.G_RM_AA_ZB_OPA_SURF2)
+      r = r1 | r2
+  else:
+      r = get_with_default(preset_cycle1, f3d.G_RM_AA_ZB_OPA_SURF)
+      r1 = r
+      # The cycle 1 bits are copied to the cycle 2 bits at export if in 1-cycle mode
+      # (the hardware requires them to be the same). So, here we also move the cycle 1
+      # bits to the cycle 2 slots. r2 is only read for the cycle dependent settings below.
+      r2 = r >> 2
+
+  return RenderMode(
+    (r & f3d.AA_EN) != 0,
+    (r & f3d.Z_CMP) != 0,
+    (r & f3d.Z_UPD) != 0,
+    (r & f3d.IM_RD) != 0,
+    (r & f3d.CLR_ON_CVG) != 0,
+    f3d.cvgDstDict[r & f3d.CVG_DST_SAVE],
+    f3d.zmodeDict[r & f3d.ZMODE_DEC],
+    (r & f3d.CVG_X_ALPHA) != 0,
+    (r & f3d.ALPHA_CVG_SEL) != 0,
+    (r & f3d.FORCE_BL) != 0,
+    (f3d.blendColorDict[(r1 >> 30) & 3], f3d.blendAlphaDict[(r1 >> 26) & 3], f3d.blendColorDict[(r1 >> 22) & 3], f3d.blendMixDict[(r1 >> 18) & 3]),
+    (f3d.blendColorDict[(r2 >> 28) & 3], f3d.blendAlphaDict[(r2 >> 24) & 3], f3d.blendColorDict[(r2 >> 20) & 3], f3d.blendMixDict[(r2 >> 16) & 3])
+  )
+
+def parse_f3d_mat_rendermode(f3d_mat):
+  rdp = f3d_mat.rdp_settings
+  if not rdp.rendermode_advanced_enabled:
+    return parse_f3d_rendermode_preset(rdp.rendermode_preset_cycle_1, rdp.rendermode_preset_cycle_2 if rdp.g_mdsft_cycletype == "G_CYC_2CYCLE" else None)
+  result = RenderMode()
+  for attr in ("aa_en", "z_cmp", "z_cmp", "im_rd", "clr_on_cvg", "cvg_dst", "zmode", "cvg_x_alpha", "alpha_cvg_sel", "force_bl"):
+    setattr(result, attr, getattr(rdp, attr))
+  result.blend_cycle1 = (rdp.blend_p1, rdp.blend_a1, rdp.blend_m1, rdp.blend_b1)
+  if rdp.g_mdsft_cycletype != "G_CYC_2CYCLE":
+   result.blend_cycle2 = result.blend_cycle1
+  else:
+    result.blend_cycle2 = (rdp.blend_p2, rdp.blend_a2, rdp.blend_m2, rdp.blend_b2)
+  return result
+
+F64Color = tuple[float, float, float, float]
+@dataclass
+class F64Rendermode:
+  blender: tuple=(0, 0, 0, 0, 0, 0, 0, 0)
+  flags: int = 0
+  blend: str = 'NONE'
+  depth_test: str = 'LESS_EQUAL'
+  depth_write: bool = True
+
+@dataclass
+class F64Light:
+  color: F64Color = (0, 0, 0, 0)
+  direction: tuple[float, float, float]|None = None
+
+@dataclass
+class F64RenderState:
+  lights: list[F64Light|None] = None
+  ambient_color: F64Color|None = None
+  light_count: int|None = None
+  prim_color: F64Color|None = None
+  prim_lod: tuple[float, float]|None = None
+  env_color: F64Color|None = None
+  ck: tuple[float, float, float, float, float, float, float, float]|None = None
+  convert: tuple[float, float, float, float, float, float]|None = None
+  prim_depth: tuple[float, float]|None = None
+  cc: np.ndarray|None = None
+  alpha_clip: float|None = None
+  render_mode: F64Rendermode|None = None
+
+  def __post_init__(self):
+    if self.lights is None: self.lights = [None] * 8
+
+  def copy(self):
+    new = copy.copy(self)
+    new.lights = copy.copy(self.lights)
+    return new
+
+  def set_if_not_none(self, other: "F64RenderState"):    
+    for light, other_light in zip(self.lights, other.lights):
+      if other_light is None: continue
+      light.color = other_light.color
+      if other_light.direction is not None: light.direction = other_light.direction
+
+    for attr in other.__dict__.keys() - ["lights"]:
+      value = getattr(other, attr, None)
+      if value is not None: setattr(self, attr, value)
+
+  def set_from_rendermode(self, rendermode: RenderMode):
+    self.render_mode = F64Rendermode(get_blender_settings(rendermode),  depth_write=rendermode.z_upd)
+    if rendermode.zmode == 'ZMODE_DEC':
+      self.render_mode.depth_test = 'EQUAL'
+      self.render_mode.flags |= DRAW_FLAG_DECAL
+    if rendermode.cvg_x_alpha:
+      self.alpha_clip = 0.49
+    if rendermode.force_bl and rendermode.blend_cycle2 == ("G_BL_CLR_IN", "G_BL_A_IN", "G_BL_CLR_MEM", "G_BL_1MA"):
+      self.render_mode.blend = "ALPHA"
+      self.render_mode.flags |= DRAW_FLAG_ALPHA_BLEND
+
+
+@dataclass
+class F64Material:
+    state: F64RenderState = dataclasses.field(default_factory=F64RenderState)
+    flags: int = 0
     tile_conf: np.ndarray = None
     cull: str = 'NONE'
-    blend: str = 'NONE'
-    depth_test: str = 'LESS_EQUAL'
-    depth_write: bool = True
-    flags: int = 0
     geo_mode: int = 0
     othermode_l: int = 0
     othermode_h: int = 0
-    alphaClip: float = -1.0
     layer: int = 0
     tex0Buff: gpu.types.GPUTexture = None
     tex1Buff: gpu.types.GPUTexture = None
 
+def quantize_direction(direction):
+  return tuple(quantize(x, 8, -1, 1) for x in direction)
 
-# parses a non-f3d material for the fallback renderer
-def node_material_parse(mat: bpy.types.Material) -> F64Material:
-  color = np.array([1, 1, 1, 1], dtype=np.float32)
-  if mat.use_nodes:
-    bsdf = mat.node_tree.nodes.get('Principled BSDF')
-    if bsdf:
-      base_color = bsdf.inputs['Base Color'].default_value
-      color = np.array([base_color[0], base_color[1], base_color[2], 1], dtype=np.float32)
+def f64_parse_obj_light(f64_light: F64Light, obj: bpy.types.Object, set_light_dir: bool):
+  from fast64_internal.utility import getObjDirectionVec
+  f64_light.color = quantize_srgb(obj.data.color, force_alpha=True)
+  if set_light_dir: f64_light.direction = quantize_direction(getObjDirectionVec(obj, False))
+  else: f64_light.direction = None
 
-  return F64Material(color, color)
+DEFAULT_LIGHT_DIR = quantize_direction(mathutils.Vector((0x49, 0x49, 0x49)).normalized())
 
-# @TODO: re-use fast64 logic
-def f64_parse_blend_mode(f3d_mat: any, f64mat: F64Material) -> str:
-  f64mat.alphaClip = -1
-  f64mat.blend = "NONE"
-  is_one_cycle = f3d_mat.rdp_settings.g_mdsft_cycletype == "G_CYC_1CYCLE"
-
-  if f3d_mat.rdp_settings.cvg_x_alpha:
-    f64mat.alphaClip = 0.49
-  elif (
-    is_one_cycle
-    and f3d_mat.rdp_settings.force_bl
-    and f3d_mat.rdp_settings.blend_p1 == "G_BL_CLR_IN"
-    and f3d_mat.rdp_settings.blend_a1 == "G_BL_A_IN"
-    and f3d_mat.rdp_settings.blend_m1 == "G_BL_CLR_MEM"
-    and f3d_mat.rdp_settings.blend_b1 == "G_BL_1MA"
-  ):
-    f64mat.blend = "ALPHA"
-    f64mat.flags |= DRAW_FLAG_ALPHA_BLEND
-  elif (
-    not is_one_cycle
-    and f3d_mat.rdp_settings.force_bl
-    and f3d_mat.rdp_settings.blend_p2 == "G_BL_CLR_IN"
-    and f3d_mat.rdp_settings.blend_a2 == "G_BL_A_IN"
-    and f3d_mat.rdp_settings.blend_m2 == "G_BL_CLR_MEM"
-    and f3d_mat.rdp_settings.blend_b2 == "G_BL_1MA"
-  ):
-    f64mat.blend = "ALPHA"
-    f64mat.flags |= DRAW_FLAG_ALPHA_BLEND
-
-def f64_material_parse(f3d_mat: any, prev_f64mat: F64Material) -> F64Material:
-  from fast64_internal.utility import s_rgb_alpha_1_tuple, gammaCorrect
+def f64_material_parse(f3d_mat: any, always_set: bool, set_light_dir: bool) -> F64Material:
+  global F64_GLOBALS
   from fast64_internal.f3d.f3d_material import all_combiner_uses
+  from fast64_internal.f3d.f3d_writer import lightDataToObj
   cc_uses = all_combiner_uses(f3d_mat)
-
-  f64mat = F64Material(
-     color_prim = gammaCorrect(f3d_mat.prim_color),
-     lod_prim   = [f3d_mat.prim_lod_min, f3d_mat.prim_lod_frac],
-     prim_depth = [f3d_mat.rdp_settings.prim_depth.z, f3d_mat.rdp_settings.prim_depth.dz],
-     set_prim   = f3d_mat.set_prim and cc_uses['Primitive'],
-     color_env  = gammaCorrect(f3d_mat.env_color),
-     set_env    = f3d_mat.set_env and cc_uses['Environment'],
-     ck         = tuple((*s_rgb_alpha_1_tuple(f3d_mat.key_center), *f3d_mat.key_scale, 0)), # extra 0 for alignment
-     set_ck     = f3d_mat.set_key and cc_uses['Key'],
-     convert    = [getattr(f3d_mat, f"k{i}") for i in range(0, 6)],
-     set_convert= f3d_mat.set_k0_5 and cc_uses['Convert'],
-     color_ambient = s_rgb_alpha_1_tuple(f3d_mat.ambient_light_color),
-     color_light = s_rgb_alpha_1_tuple(f3d_mat.default_light_color),
-     set_ambient = f3d_mat.set_lights,
-     set_light   = f3d_mat.set_lights, # shared flag
-
-     flags = 0,
-     cc = get_cc_settings(f3d_mat),
-     blender= get_blender_settings(f3d_mat)
-  )
-
-  f64mat.color_prim.append(f3d_mat.prim_color[3])
-  f64mat.color_env.append(f3d_mat.env_color[3])
-
+  rdp = f3d_mat.rdp_settings
+  state = F64RenderState() # None equals not set
+  f64mat = F64Material(state=state)
+  if always_set or rdp.set_rendermode: state.set_from_rendermode(parse_f3d_mat_rendermode(f3d_mat))
+  if always_set or f3d_mat.set_combiner: state.cc = get_cc_settings(f3d_mat)
+  if always_set or (f3d_mat.set_prim and cc_uses['Primitive']): 
+    state.prim_color = quantize_srgb(f3d_mat.prim_color)
+    state.prim_lod = (f3d_mat.prim_lod_min, f3d_mat.prim_lod_frac)
+  if always_set or (f3d_mat.set_env and cc_uses['Environment']): state.env_color = quantize_srgb(f3d_mat.env_color)
+  if always_set or (f3d_mat.set_key and cc_uses['Key']): # extra 0 for alignment
+    state.ck = tuple((*quantize_srgb(f3d_mat.key_center, force_alpha=True), *f3d_mat.key_scale, 0))
+  if always_set or (f3d_mat.set_k0_5 and cc_uses['Convert']): 
+    state.convert = tuple(getattr(f3d_mat, f"k{i}") for i in range(0, 6))
+  if always_set or (cc_uses["Shade"] and rdp.g_lighting and f3d_mat.set_lights):
+    state.ambient_color = quantize_srgb(f3d_mat.ambient_light_color, force_alpha=True)
+    if f3d_mat.use_default_lighting:
+      state.light_count = 1
+      state.lights[0] = F64Light(quantize_srgb(f3d_mat.default_light_color, force_alpha=True))
+      if set_light_dir: state.lights[0].direction = DEFAULT_LIGHT_DIR
+    else:
+      light_index = 0
+      for i in range(0, 7):
+        light_data = getattr(f3d_mat, f"f3d_light{i + 1}", None)
+        if light_data is None:
+          continue
+        obj = lightDataToObj(light_data.original)
+        f64_light = state.lights[light_index] = F64_GLOBALS.obj_lights.setdefault(obj.name, F64Light())
+        f64_parse_obj_light(f64_light, obj, set_light_dir)
+        light_index += 1
+      state.light_count = light_index
+ 
   if f3d_mat.rdp_settings.g_cull_back: f64mat.cull = "BACK"
   if f3d_mat.rdp_settings.g_cull_front: 
     f64mat.cull = "BOTH" if f64mat.cull == "BACK" else "FRONT"
-  
-  f64_parse_blend_mode(f3d_mat, f64mat)
 
   from fast64_internal.f3d.f3d_gbi import get_F3D_GBI
   from fast64_internal.f3d.f3d_material import get_textlut_mode
@@ -185,13 +286,7 @@ def f64_material_parse(f3d_mat: any, prev_f64mat: F64Material) -> F64Material:
   f64mat.geo_mode, f64mat.othermode_l, f64mat.othermode_h = geo_mode, othermode_l, othermode_h
   
   game_mode = bpy.context.scene.gameEditorMode
-  f64mat.layer = getattr(f3d_mat.draw_layer, game_mode.lower(), None)
-
-  if f3d_mat.rdp_settings.zmode == 'ZMODE_DEC':
-    f64mat.depth_test = 'EQUAL'
-    f64mat.flags |= DRAW_FLAG_DECAL
-
-  f64mat.depth_write = f3d_mat.rdp_settings.z_upd
+  f64mat.layer = int(getattr(f3d_mat.draw_layer, game_mode.lower(), None), 0)
 
   # Note: doing 'gpu.texture.from_image' seems to cost nothing, caching is not needed
   if f3d_mat.tex0.tex_set:
@@ -224,3 +319,14 @@ def f64_material_parse(f3d_mat: any, prev_f64mat: F64Material) -> F64Material:
   f64mat.tile_conf = get_tile_conf(f3d_mat)
 
   return f64mat
+
+# parses a non-f3d material for the fallback renderer
+def node_material_parse(mat: bpy.types.Material) -> F64Material:
+  # TODO: If bsdf to f3d gets merged into fast, consider using that?
+  color = None
+  if mat.use_nodes:
+    bsdf = mat.node_tree.nodes.get('Principled BSDF')
+    if bsdf:
+      color = quantize_srgb(bsdf.inputs['Base Color'].default_value)
+
+  return F64Material(F64RenderState(prim_color=color, cc=SOLID_CC), tile_conf=(0, ) * 16)

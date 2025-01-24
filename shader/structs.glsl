@@ -1,5 +1,11 @@
 // NOTE: this file is included by blender via 'shader_info.typedef_source(...)'
 
+struct Light
+{
+  vec4 color;
+  vec3 dir;
+};
+
 struct UBO_Material
 {
   ivec4 blender[2];
@@ -17,20 +23,22 @@ struct UBO_Material
   ivec4 cc1Alpha;
 
   ivec4 modes; // geo, other-low, other-high, flags
-  vec4 lightColor[2];
-  vec4 lightDir[2]; // [0].w is alpha clip
+  Light lights[8];
   vec4 prim_color;
+  vec4 primLodDepth;
   vec4 env;
   vec4 ambientColor;
   vec4 ck_center;
   vec4 ck_scale;
-  vec4 primLodDepth;
   vec4 k_0123;
-  vec2 k_45;  
+  vec3 k45AlphaClip;
+  int numLights;
 };
 
 #define GEO_MODE     material.modes.x
 #define OTHER_MODE_L material.modes.y
 #define OTHER_MODE_H material.modes.z
 #define DRAW_FLAGS   material.modes.w
-#define ALPHA_CLIP   material.lightDir[0].w
+#define ALPHA_CLIP   material.k45AlphaClip.z
+#define K45          material.k45AlphaClip.xy
+#define NUM_LIGHTS   material.numLights

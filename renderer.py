@@ -1,50 +1,144 @@
-import math
-import struct
+import dataclasses, copy, math, struct, pathlib, time
 from typing import NamedTuple
+
 import bpy
 import mathutils
 import gpu
+
 from .utils.addon import addon_set_fast64_path
 from .mesh.gpu_batch import create_vert_buf, batch_for_shader
-from .material.parser import F64Material, f64_material_parse, node_material_parse
-import pathlib
-import time
-import numpy as np
-
+from .material.parser import (
+  F64Material, 
+  f64_material_parse, 
+  f64_parse_obj_light, 
+  node_material_parse, 
+  parse_f3d_rendermode_preset,
+  quantize_direction, 
+  quantize_srgb, 
+  F64RenderState, 
+  F64Rendermode,
+  F64Light
+)
+from .material.cc import SOLID_CC
 from .mesh.mesh import MeshBuffers, mesh_to_buffers
-
-f64render_materials_dirty = True
-f64render_instance = None
-f64render_meshCache: dict[MeshBuffers] = {}
-current_ucode = None
+from .f64_globals import F64_GLOBALS
 
 # N64 is y-up, blender is z-up
 yup_to_zup = mathutils.Quaternion((1, 0, 0), math.radians(90.0)).to_matrix().to_4x4()
 
 MISSING_TEXTURE_COLOR = (0, 0, 0, 1)
 
+LIGHT_STRUCT = "4f 3f 4x " # color, direction, padding
+
 UNIFORM_BUFFER_STRUCT = struct.Struct(
   "8i"              # blender
   "16f"             # tile settings (mask/shift/low/high)
   "16i"             # color-combiner settings
-  "i i i i"         # geoMode, other-low, other-high, flags
-  "4f 4f 3f f 3f f" # light (first light direction W is alpha-clip)
-  "4f 4f 4f"        # prim, env, ambient
-  "2f 2f"           # prim_lod, prim-depth
-  "8f 6f"           # ck center/scale, k0-k5,
+  "i i i i" +       # geoMode, other-low, other-high, flags
+  (LIGHT_STRUCT * 8)# lights
+  + "4f 4f 4f 4f"   # prim, prim_lod, prim-depth, env, ambient
+  "8f"              # ck center/scale,
+  "6f f 4x"         # k0-k5, alpha clip, padding
+  "i"               # light count
 )
 
+def get_struct_ubo_size(s: struct.Struct):
+  return (s.size + 15) & ~15 # force 16-byte alignment
+
+FALLBACK_MATERIAL = F64Material(state=F64RenderState(cc=SOLID_CC), tile_conf=(0, ) * 16)
+
 def cache_del_by_mesh(mesh_name):
-  global f64render_meshCache
-  for key in list(f64render_meshCache.keys()):
-    if f64render_meshCache[key].mesh_name == mesh_name:
-      del f64render_meshCache[key]
+  global F64_GLOBALS
+  for key in list(F64_GLOBALS.meshCache.keys()):
+    if F64_GLOBALS.meshCache[key].mesh_name == mesh_name:
+      del F64_GLOBALS.meshCache[key]
 
 def obj_has_f3d_materials(obj):
   for slot in obj.material_slots:
     if slot.material.is_f3d and slot.material.f3d_mat:
       return True
   return False
+
+def materials_set_light_direction(scene):
+  return not (scene.gameEditorMode == "SM64" and scene.fast64.sm64.matstack_fix)
+
+def get_scene_render_state(scene: bpy.types.Scene):
+  fast64_rs = scene.fast64.renderSettings
+  f64render_rs: F64RenderSettings = scene.f64render.render_settings
+  state = F64RenderState(
+    lights=[F64Light(direction=(0, 0, 0)) for _x in range(0, 8)],
+    ambient_color=quantize_srgb(fast64_rs.ambientColor, force_alpha=True),
+    light_count=2,
+    prim_color=quantize_srgb(f64render_rs.default_prim_color),
+    prim_lod=(0, 0),
+    env_color=quantize_srgb(f64render_rs.default_env_color),
+    ck=(0, 0, 0, 0, 0, 0, 0, 0),
+    convert=(0, 0, 0, 0, 0, 0),
+    prim_depth=(0, 0), # TODO: use world settings
+    cc=SOLID_CC,
+    alpha_clip=-1,
+    render_mode=F64Rendermode(),
+  )
+  state.lights[0] = F64Light(quantize_srgb(fast64_rs.light0Color, force_alpha=True), quantize_direction(fast64_rs.light0Direction))
+  state.lights[1] = F64Light(quantize_srgb(fast64_rs.light1Color, force_alpha=True), quantize_direction(fast64_rs.light1Direction))
+  state.set_from_rendermode(parse_f3d_rendermode_preset("G_RM_AA_ZB_OPA_SURF", "G_RM_AA_ZB_OPA_SURF2"))
+  return state
+
+class AreaRenderInfo(NamedTuple): # areas, etc
+  render_state: F64RenderState
+  name: str
+  def __hash__(self):
+    return hash(self.name)
+
+def get_sm64_area_childrens(scene: bpy.types.Scene):
+  global F64_GLOBALS
+  area_objs = []
+  def get_children_until_next_area(obj: bpy.types.Object):
+    children = []
+    for child in sorted(obj.children, key=lambda item: item.name): 
+      if child not in area_objs: 
+        children.append(child)
+        children.extend(get_children_until_next_area(child))
+    return children
+
+  if F64_GLOBALS.area_lookup is not None:
+    return F64_GLOBALS.area_lookup
+
+  area_lookup = {}
+  for obj in bpy.data.objects: # find all area type objects
+    if obj.sm64_obj_type == "Area Root": area_objs.append(obj)
+
+  render_state = get_scene_render_state(scene)
+  for area_obj in area_objs:
+    area_info = AreaRenderInfo(render_state, area_obj.name)
+    for child in get_children_until_next_area(area_obj):
+      area_lookup[child.name] = area_info
+
+  fake_area = AreaRenderInfo(render_state, "")
+  for obj in bpy.data.objects:
+    if obj.name not in area_lookup:
+      area_lookup[obj.name] = fake_area
+
+  F64_GLOBALS.area_lookup = area_lookup
+  return area_lookup
+
+# TODO if porting to fast64, reuse existing default layer dict
+SM64_DEFAULT_LAYERS = (("G_RM_ZB_OPA_SURF", "G_RM_ZB_OPA_SURF2"), 
+                      ("G_RM_AA_ZB_OPA_SURF", "G_RM_AA_ZB_OPA_SURF2"), 
+                      ("G_RM_AA_ZB_OPA_DECAL", "G_RM_AA_ZB_OPA_DECAL2"), 
+                      ("G_RM_AA_ZB_OPA_INTER", "G_RM_AA_ZB_OPA_INTER2"), 
+                      ("G_RM_AA_ZB_TEX_EDGE", "G_RM_AA_ZB_TEX_EDGE2"), 
+                      ("G_RM_AA_ZB_XLU_SURF", "G_RM_AA_ZB_XLU_SURF2"), 
+                      ("G_RM_AA_ZB_XLU_DECAL", "G_RM_AA_ZB_XLU_DECAL2"), 
+                      ("G_RM_AA_ZB_XLU_INTER", "G_RM_AA_ZB_XLU_INTER2"))
+
+@dataclasses.dataclass
+class ObjRenderInfo:
+  obj: bpy.types.Object
+  mvp_matrix: mathutils.Matrix
+  normal_matrix: mathutils.Matrix
+  render_obj: MeshBuffers
+  mats: list[tuple[int, int, F64Material]] # mat idx, indice count, material
 
 class Fast64RenderEngine(bpy.types.RenderEngine):
   bl_idname = "FAST64_RENDER_ENGINE"
@@ -60,7 +154,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     self.shader_fallback = None
     self.vbo_format = None
     self.draw_handler = None
-    self.last_ucode = None
+    self.world_lighting = False
 
     self.time_count = 0
     self.time_total = 0
@@ -68,7 +162,10 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     self.depth_texture: gpu.types.GPUTexture = None
     self.color_texture: gpu.types.GPUTexture = None
     self.update_render_size(128, 128)
+
     bpy.app.handlers.depsgraph_update_post.append(Fast64RenderEngine.mesh_change_listener)
+    bpy.app.handlers.frame_change_post.append(Fast64RenderEngine.mesh_change_listener)
+    bpy.app.handlers.load_pre.append(Fast64RenderEngine.on_file_load)
 
     if "f64render_missing_texture" not in bpy.data.images:
       # Create a 1x1 image
@@ -84,10 +181,13 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     self.draw_range_impl = bpy.app.version >= (3, 6, 0)
 
   def __del__(self):
-    if Fast64RenderEngine.mesh_change_listener in bpy.app.handlers.depsgraph_update_post:
-      bpy.app.handlers.depsgraph_update_post.remove(Fast64RenderEngine.mesh_change_listener)
-    pass
-  
+    def remove_handler(handler, func):
+      while func in handler:
+        handler.remove(func)
+    remove_handler(bpy.app.handlers.depsgraph_update_post, Fast64RenderEngine.mesh_change_listener)
+    remove_handler(bpy.app.handlers.frame_change_post, Fast64RenderEngine.mesh_change_listener)
+    remove_handler(bpy.app.handlers.load_pre, Fast64RenderEngine.on_file_load)
+
   def update_render_size(self, size_x, size_y):
     if not self.depth_texture or size_x != self.depth_texture.width or size_y != self.depth_texture.height:
       self.depth_texture = gpu.types.GPUTexture((size_x, size_y), format='R32I')
@@ -135,6 +235,9 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
         if self.shader_interlock_support:
           shader_info.define("USE_SHADER_INTERLOCK", "1")
         shader_info.define("BLEND_EMULATION", "1")
+      # Using the already calculated view space normals instead of transforming the light direction makes
+      # for cleaner and faster code
+      shader_info.define("VIEWSPACE_LIGHTING", "0" if self.world_lighting else "1")
 
       shader_info.push_constant("MAT4", "matMVP")
       shader_info.push_constant("MAT3", "matNorm")
@@ -196,27 +299,38 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
       self.shader_2d = gpu.shader.create_from_info(shader_info)                             
 
   def mesh_change_listener(scene, depsgraph):
-    global f64render_meshCache
-    global f64render_materials_dirty
-    global current_ucode
+    global F64_GLOBALS
     # print("################ MESH CHANGE LISTENER ################")  
 
     if depsgraph.id_type_updated('SCENE'):
-      if current_ucode != depsgraph.scene.f3d_type:
-        f64render_materials_dirty = True
-        current_ucode = depsgraph.scene.f3d_type
+      if F64_GLOBALS.current_ucode != depsgraph.scene.f3d_type:
+        F64_GLOBALS.materials_cache = {}
+        F64_GLOBALS.current_ucode = depsgraph.scene.f3d_type
 
-    if depsgraph.id_type_updated('MATERIAL'):
-      for update in depsgraph.updates:
-        # this seems to trigger for all materials if only one changed (@TODO: check if i can get proper updates)
-        f64render_materials_dirty = True
+    for update in depsgraph.updates:
+      if isinstance(update.id, bpy.types.Material) and update.id in F64_GLOBALS.materials_cache:
+        F64_GLOBALS.materials_cache.pop(update.id)
+      is_obj_update = isinstance(update.id, bpy.types.Object)
 
-    if depsgraph.id_type_updated('OBJECT'):
-      for update in depsgraph.updates:
-        if isinstance(update.id, bpy.types.Object) and update.id.type in {"MESH", "CURVE", "SURFACE", "FONT"}:
+      # support animating lights without uncaching materials, check if a light object was updated
+      if ((is_obj_update and isinstance(update.id.data, bpy.types.Light)) and update.id.data.name in F64_GLOBALS.obj_lights):
+        f64_parse_obj_light(
+          F64_GLOBALS.obj_lights[update.id.name], 
+          update.id, 
+          materials_set_light_direction(depsgraph.scene)
+        )
+      if is_obj_update and update.id.type in {"MESH", "CURVE", "SURFACE", "FONT"}:
+        F64_GLOBALS.area_lookup = None
+        if update.is_updated_geometry:
           cache_del_by_mesh(update.id.data.name)
 
+  @bpy.app.handlers.persistent
+  def on_file_load(_context):
+    global F64_GLOBALS
+    F64_GLOBALS.clear()
+
   def view_update(self, context, depsgraph):
+    global F64_GLOBALS
     if self.draw_handler is None:
       self.draw_handler = bpy.types.SpaceView3D.draw_handler_add(self.draw_scene, (context, depsgraph), 'WINDOW', 'POST_VIEW')
 
@@ -224,21 +338,15 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     for obj in depsgraph.objects:
       if obj.type == 'MESH' and obj.mode == 'EDIT':
         meshID = obj.name + "#" + obj.data.name
-        if meshID in f64render_meshCache:
-          del f64render_meshCache[meshID]
+        if meshID in F64_GLOBALS.meshCache:
+          del F64_GLOBALS.meshCache[meshID]
 
   def view_draw(self, context, depsgraph):
     self.draw_scene(context, depsgraph)
 
-  def draw_mat(self, render_obj: MeshBuffers, mat_idx: int, indices_count: int):
-    if self.draw_range_impl:
-      render_obj.batch.draw_range(self.shader, elem_start=render_obj.index_offsets[mat_idx] * 3, elem_count=indices_count)
-    else:
-      render_obj.batch[mat_idx].draw(self.shader)
-
   def draw_scene(self, context, depsgraph):
-    global f64render_meshCache
-    global f64render_materials_dirty
+    from fast64_internal.utility import get_blender_to_game_scale
+    global F64_GLOBALS
     
     # TODO: fixme, after reloading this script during dev, something calls this function
     #       with an invalid reference (viewport?)
@@ -247,12 +355,19 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
 
     t = time.process_time()
 
+    ubo_size = get_struct_ubo_size(UNIFORM_BUFFER_STRUCT)
+
     space_view_3d = context.space_data
     if self.shader_info_img_impl:
       self.update_render_size(context.region.width, context.region.height)
       self.color_texture.clear(format='UINT', value=[0x080808])
       self.depth_texture.clear(format='INT', value=[0])
 
+    world_lighting = depsgraph.scene.fast64.renderSettings.useWorldSpaceLighting
+    if world_lighting != self.world_lighting:
+      self.world_lighting = world_lighting
+      self.shader = None
+    
     self.init_shader()
     self.shader.bind()
 
@@ -261,58 +376,37 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     gpu.state.depth_mask_set(True)
 
     # global params
-    fast64_rs = depsgraph.scene.fast64.renderSettings
     f64render_rs: F64RenderSettings = depsgraph.scene.f64render.render_settings
-    lightDir0, lightDir1 = fast64_rs.light0Direction, fast64_rs.light1Direction
-    if not fast64_rs.useWorldSpaceLighting:
-      view_rotation = (mathutils.Quaternion((1, 0, 0), math.radians(90.0)) @ context.region_data.view_matrix.to_quaternion()).to_matrix()
-      lightDir0, lightDir1 = lightDir0 @ view_rotation, lightDir1 @ view_rotation
+    fast64_rs = depsgraph.scene.fast64.renderSettings
+    set_light_dir = materials_set_light_direction(depsgraph.scene)
+    always_set = f64render_rs.always_set
 
     # Note: space conversion to Y-up happens indirectly during the normal matrix calculation
-    lightColor0 = fast64_rs.light0Color
-    lightColor1 = fast64_rs.light1Color
-    ambientColor = fast64_rs.ambientColor
-
-    lastPrimColor = f64render_rs.default_prim_color
-    last_prim_lod = np.array([0, 0], dtype=np.float32)
-    lastEnvColor = f64render_rs.default_env_color
-    last_ck = np.array([0, 0, 0, 0, 0, 0, 0, 0], dtype=np.float32)
-    last_convert = np.array([0, 0, 0, 0, 0, 0], dtype=np.float32)
-
-    fallback_objs = []
+  
     # get visible objects, this cannot be done in despgraph objects for whatever reason
     hidden_obj = [ob.name for ob in bpy.context.view_layer.objects if not ob.visible_get() and ob.data is not None]
 
-    class TempObjRenderInfo(NamedTuple):
-      mvp_matrix: mathutils.Matrix
-      normal_matrix: mathutils.Matrix
-      render_obj: MeshBuffers
-      mats: list[tuple[int, F64Material]]
-
-    render_queue: dict[int, dict[bpy.types.Object, TempObjRenderInfo]] = {}
+    objs_info: list[ObjRenderInfo] = []
     for obj in depsgraph.objects:
       if obj.type in {"MESH", "CURVE", "SURFACE", "FONT"} and obj.data is not None:
-
         meshID = obj.name + "#" + obj.data.name
 
         # check for objects that transitioned from non-f3d to f3d materials
-        if meshID in f64render_meshCache:
-          renderObj = f64render_meshCache[meshID]
-          if len(renderObj.mat_data) == 0 and obj_has_f3d_materials(obj):
-            del f64render_meshCache[meshID]
-            
+        if meshID in F64_GLOBALS.meshCache:
+          renderObj = F64_GLOBALS.meshCache[meshID]
+
         # Mesh not cached: parse & convert mesh data, then prepare a GPU batch
-        if meshID not in f64render_meshCache:
+        if meshID not in F64_GLOBALS.meshCache:
           # print("    -> Update object", meshID)
           if obj.mode == 'EDIT':
             mesh = obj.evaluated_get(depsgraph).to_mesh()
           else:
             mesh = obj.evaluated_get(depsgraph).to_mesh(preserve_all_data_layers=True, depsgraph=depsgraph)
 
-          renderObj = f64render_meshCache[meshID] = mesh_to_buffers(mesh)
+          renderObj = F64_GLOBALS.meshCache[meshID] = mesh_to_buffers(mesh)
           renderObj.mesh_name = obj.data.name
 
-          mat_count = len(obj.material_slots)
+          mat_count = max(len(obj.material_slots), 1)
           vert_buf = create_vert_buf(self.vbo_format,
             renderObj.vert,
             renderObj.norm,
@@ -334,22 +428,13 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
               else:
                 renderObj.batch.append(batch_for_shader(vert_buf, indices))
 
-          ubo_size = UNIFORM_BUFFER_STRUCT.size
-          ubo_size = (ubo_size + 15) & ~15 # force 16-byte alignment
-
           renderObj.mat_data = [bytes(ubo_size)] * mat_count
-
           renderObj.ubo_mat_data = [None] * mat_count
-          renderObj.materials = [None] * mat_count
 
           for i in range(mat_count):
             renderObj.ubo_mat_data[i] = gpu.types.GPUUniformBuf(renderObj.mat_data[i])
 
           obj.to_mesh_clear()
-        
-        if not obj_has_f3d_materials(obj):
-          fallback_objs.append(obj)
-          continue
 
         if obj.data is None: continue
         # Handle "Local View" (pressing '/')
@@ -360,34 +445,38 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
         # print("space_view_3d.local_view", space_view_3d.clip_start, space_view_3d.clip_end)
 
         meshID = obj.name + "#" + obj.data.name
-        if meshID not in f64render_meshCache: continue
+        if meshID not in F64_GLOBALS.meshCache: continue
         # print("  -> Draw object", meshID)
-        render_obj: MeshBuffers = f64render_meshCache[meshID]
+        render_obj: MeshBuffers = F64_GLOBALS.meshCache[meshID]
 
         modelview_matrix = obj.matrix_world
         projection_matrix = context.region_data.perspective_matrix
         mvp_matrix = projection_matrix @ modelview_matrix
         normal_matrix = (context.region_data.view_matrix @ obj.matrix_world).to_3x3().inverted().transposed()
+
+        info = ObjRenderInfo(obj, mvp_matrix, normal_matrix, render_obj, [])
+        objs_info.append(info)
+
+        if len(obj.material_slots) == 0: # fallback if no material, f3d or otherwise
+          info.mats.append((0, len(render_obj.indices) * 3, FALLBACK_MATERIAL))
         for i, slot in enumerate(obj.material_slots):
           indices_count = (render_obj.index_offsets[i+1] - render_obj.index_offsets[i]) * 3
           if indices_count == 0: # ignore unused materials
             continue
+          if slot.material is None:
+              continue
+          cached = slot.material in F64_GLOBALS.materials_cache
+          if not cached:
+            if slot.material.is_f3d:
+              F64_GLOBALS.materials_cache[slot.material] = f64_material_parse(slot.material.f3d_mat, always_set, set_light_dir)
+            else: # fallback
+              F64_GLOBALS.materials_cache[slot.material] = node_material_parse(slot.material)
 
-          f3d_mat = slot.material.f3d_mat                    
-          if f64render_materials_dirty or render_obj.materials[i] is None:
-            render_obj.materials[i] = f64_material_parse(f3d_mat, render_obj.materials[i])
-
-          f64mat = render_obj.materials[i]
+          f64mat = F64_GLOBALS.materials_cache[slot.material]
           if f64mat.cull == "BOTH":
             continue
-          obj_queue = render_queue.setdefault(f64mat.layer, {})
-          info = obj_queue.setdefault(
-            obj, TempObjRenderInfo(mvp_matrix, normal_matrix, render_obj, [])
-          )
+
           info.mats.append((i, indices_count, f64mat))
-    for i, layer in render_queue.items():
-      render_queue[i] = dict(sorted(layer.items(), key=lambda item: item[0].name))
-    render_queue = dict(sorted(render_queue.items(), key=lambda item: item[0]))
 
     if self.shader_info_img_impl:
       self.shader.image('depth_texture', self.depth_texture)
@@ -397,57 +486,94 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     gpu.state.depth_mask_set(False)
     gpu.state.blend_set("NONE")
 
-    # Draw materials in layer order
-    for obj_queue in render_queue.values():
-      for obj, info in obj_queue.items():
-        self.shader.uniform_float("matMVP", info.mvp_matrix)
-        self.shader.uniform_float("matNorm", info.normal_matrix)
-   
-        for mat_idx, indices_count, f64mat in info.mats:
-          gpu.state.face_culling_set(f64mat.cull)
-          if not self.shader_info_img_impl:
-            gpu.state.blend_set(f64mat.blend)
-            gpu.state.depth_test_set(f64mat.depth_test)
-            gpu.state.depth_mask_set(f64mat.depth_write)
+    def draw_obj(render_state: F64RenderState, info: ObjRenderInfo):
+      self.shader.uniform_float("matMVP", info.mvp_matrix)
+      self.shader.uniform_float("matNorm", info.normal_matrix)
 
-          if f64mat.tex0Buff: self.shader.uniform_sampler("tex0", f64mat.tex0Buff)
-          if f64mat.tex1Buff: self.shader.uniform_sampler("tex1", f64mat.tex1Buff)
+      for mat_idx, indices_count, f64mat in info.mats:
+        render_state.set_if_not_none(f64mat.state)
 
-          info.render_obj.mat_data[mat_idx] = UNIFORM_BUFFER_STRUCT.pack(
-            *f64mat.blender,
-            *f64mat.tile_conf,
-            *f64mat.cc,
-            f64mat.geo_mode,
-            f64mat.othermode_l,
-            f64mat.othermode_h,
-            f64mat.flags,
-            *(f64mat.color_light if f64mat.set_light      else lightColor0),
-            *lightColor1,
-            *lightDir0,
-            f64mat.alphaClip,
-            *lightDir1,
-            0,
-            *(f64mat.color_prim    if f64mat.set_prim     else lastPrimColor),
-            *(f64mat.color_env     if f64mat.set_env      else lastEnvColor),
-            *(f64mat.color_ambient if f64mat.set_ambient  else ambientColor),
-            *(f64mat.ck            if f64mat.set_ck       else last_ck),
-            *(f64mat.lod_prim      if f64mat.set_prim     else last_prim_lod),
-            *f64mat.prim_depth,
-            *(f64mat.convert       if f64mat.set_convert  else last_convert),
-          )
+        gpu.state.face_culling_set(f64mat.cull)
+        if not self.shader_info_img_impl:
+          gpu.state.blend_set(render_state.render_mode.blend)
+          gpu.state.depth_test_set(render_state.render_mode.depth_test)
+          gpu.state.depth_mask_set(render_state.render_mode.depth_write)
 
-          if f64mat.set_prim: lastPrimColor, last_prim_lod = f64mat.color_prim, f64mat.lod_prim
-          if f64mat.set_env: lastEnvColor = f64mat.color_env
-          if f64mat.set_ck: last_ck = f64mat.ck
-          if f64mat.set_convert: last_convert = f64mat.convert
-          
-          info.render_obj.ubo_mat_data[mat_idx].update(info.render_obj.mat_data[mat_idx])                        
-          self.shader.uniform_block("material", info.render_obj.ubo_mat_data[mat_idx])
-          
-          # @TODO: frustum-culling (blender doesn't do it)
-          self.draw_mat(info.render_obj, mat_idx, indices_count)
+        if f64mat.tex0Buff: self.shader.uniform_sampler("tex0", f64mat.tex0Buff)
+        if f64mat.tex1Buff: self.shader.uniform_sampler("tex1", f64mat.tex1Buff)
 
-    f64render_materials_dirty = False
+        light_data = []
+        for l in render_state.lights[:render_state.light_count]:
+          light_data.extend(l.color)
+          light_data.extend(l.direction)
+        light_data.extend([0.0] * ((8 - render_state.light_count) * 7))
+        info.render_obj.mat_data[mat_idx] = UNIFORM_BUFFER_STRUCT.pack(
+          *render_state.render_mode.blender,
+          *f64mat.tile_conf,
+          *render_state.cc,
+          f64mat.geo_mode,
+          f64mat.othermode_l,
+          f64mat.othermode_h,
+          f64mat.flags | render_state.render_mode.flags,
+          *light_data,
+          *render_state.prim_color,
+          *render_state.prim_lod,
+          *render_state.prim_depth,
+          *render_state.env_color,
+          *render_state.ambient_color,
+          *render_state.ck,
+          *render_state.convert,
+          render_state.alpha_clip,
+          render_state.light_count,
+        )
+        
+        info.render_obj.ubo_mat_data[mat_idx].update(info.render_obj.mat_data[mat_idx])                        
+        self.shader.uniform_block("material", info.render_obj.ubo_mat_data[mat_idx])
+        
+        # @TODO: frustum-culling (blender doesn't do it)
+        if self.draw_range_impl:
+          info.render_obj.batch.draw_range(self.shader, elem_start=info.render_obj.index_offsets[mat_idx] * 3, elem_count=indices_count)
+        else:
+          info.render_obj.batch[mat_idx].draw(self.shader)
+
+    match depsgraph.scene.gameEditorMode: # game mode implmentations
+      case "SM64":
+        layer_rendermodes = {} # TODO: should this be cached globally?
+        world = depsgraph.scene.world
+        for layer, (cycle1, cycle2) in enumerate(SM64_DEFAULT_LAYERS):
+          if world:
+            cycle1, cycle2 = (getattr(world, f"draw_layer_{layer}_cycle_{cycle}") for cycle in range(1, 3))
+          layer_rendermodes[layer] = parse_f3d_rendermode_preset(cycle1, cycle2)
+
+        render_type = f64render_rs.sm64_render_type
+        ignore, collision = render_type == "IGNORE", render_type == "COLLISION"
+        area_lookup = get_sm64_area_childrens(depsgraph.scene)
+        area_queue: dict[AreaRenderInfo, dict[int, dict[str, ObjRenderInfo]]] = {}
+        for info in objs_info:
+          if (ignore and info.obj.ignore_render) or collision and info.obj.ignore_collision:
+            continue
+          name = info.obj.name
+          area = area_lookup[name]
+          layer_queue = area_queue.setdefault(area, {}) # if area has no queue, create it
+          for mat_info in info.mats:
+            mat = mat_info[2]
+            obj_queue = layer_queue.setdefault(mat.layer, {}) # if layer has no queue, create it
+            if name not in obj_queue: # if obj not already present in the layer's obj queue, create a shallow copy
+              obj_info = obj_queue[name] = copy.copy(info)
+              obj_info.mats = []
+            obj_queue[name].mats.append(mat_info)
+
+        for area, layer_queue in area_queue.items():
+          render_state = area.render_state.copy()
+          for layer, obj_queue in sorted(layer_queue.items(), key=lambda item: item[0]): # sort by layer
+            render_state.set_from_rendermode(layer_rendermodes[layer])
+            for info in dict(sorted(obj_queue.items(), key=lambda item: item[0])): # sort by obj name
+              draw_obj(render_state, obj_queue[info])
+      case _:
+        render_state = get_scene_render_state(depsgraph.scene)
+        for info in objs_info:
+          draw_obj(render_state, info)
+
     draw_time = (time.process_time() - t) * 1000
     self.time_total += draw_time
     self.time_count += 1
@@ -457,35 +583,6 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
       print("Time F3D AVG (ms)", self.time_total / self.time_count, self.time_count)
       self.time_total = 0
       self.time_count = 0
-          
-    if len(fallback_objs) > 0:
-      t = time.process_time()
-      self.shader_fallback.bind()
-
-      for obj in fallback_objs:
-        meshID = obj.name + "#" + obj.data.name
-        renderObj = f64render_meshCache[meshID]
-
-        if obj.name in hidden_obj: continue
-
-        # get material (we don't expect any changes here, so caching is fine)
-        if renderObj.materials is None or len(renderObj.materials) == 0:
-          renderObj.materials = [F64Material()]
-          if obj.material_slots:
-            mat = obj.material_slots[0].materials[0]
-            renderObj.materials[0] = node_material_parse(mat)
-
-        self.shader_fallback.uniform_float("color", renderObj.materials[0].color_prim)
-
-        modelview_matrix = obj.matrix_world
-        projection_matrix = context.region_data.perspective_matrix
-        mvp_matrix = projection_matrix @ modelview_matrix
-        self.shader_fallback.uniform_float("ModelViewProjectionMatrix", mvp_matrix)
-
-        self.draw_mat(renderObj, 0, len(renderObj.indices))
-        obj.to_mesh_clear()
-
-      #print("Time fallback (ms)", (time.process_time() - t) * 1000)
 
     if not self.shader_info_img_impl:
       return # when there's no access to color and depth aux images, we render directly, so skip final 2d draw
@@ -511,6 +608,14 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
 
     #print("Time 2D (ms)", (time.process_time() - t) * 1000)
 
+def update_all_materials(_scene, _context):
+  global F64_GLOBALS
+  F64_GLOBALS.materials_cache = {}
+
+def reset_area_lookup(_scene, _context):
+  global F64_GLOBALS
+  F64_GLOBALS.area_lookup = None
+
 class F64RenderSettings(bpy.types.PropertyGroup):
   default_prim_color: bpy.props.FloatVectorProperty(
     name="Default Prim Color",
@@ -518,7 +623,7 @@ class F64RenderSettings(bpy.types.PropertyGroup):
     subtype="COLOR",
     size=4,
     min=0,
-    max=1,
+    max=1
   )
   default_env_color: bpy.props.FloatVectorProperty(
     name="Default Env Color",
@@ -526,7 +631,16 @@ class F64RenderSettings(bpy.types.PropertyGroup):
     subtype="COLOR",
     size=4,
     min=0,
-    max=1,
+    max=1
+  )
+  always_set: bpy.props.BoolProperty(name="Ignore \"Set (Source)\"", update=update_all_materials)
+  sm64_render_type: bpy.props.EnumProperty(
+    name="Render Objects", 
+    items=[
+      ("DEFAULT", "Always Draw", "Always Draw"), 
+      ("IGNORE", "Respect \"Ignore Render\"", "Respect \"Ignore Render\""), 
+      ("COLLISION", "Only Collision", "Collision")
+    ],
   )
 
 class F64RenderProperties(bpy.types.PropertyGroup):
@@ -539,10 +653,14 @@ class F64RenderSettingsPanel(bpy.types.Panel):
   bl_region_type = "WINDOW"
 
   def draw(self, context):
-    layout = self.layout
+    layout = self.layout.column()
     f64render_rs: F64RenderSettings = context.scene.f64render.render_settings
     layout.prop(f64render_rs, "default_prim_color")
     layout.prop(f64render_rs, "default_env_color")
+    layout.separator()
+    layout.prop(f64render_rs, "always_set")
+    if context.scene.gameEditorMode == "SM64":
+      layout.prop(f64render_rs, "sm64_render_type")
 
 def draw_render_settings(self, context):
   if context.scene.render.engine == Fast64RenderEngine.bl_idname:
@@ -571,9 +689,7 @@ def get_panels():
     return panels
 
 def register():
-  global f64render_meshCache
-  f64render_meshCache = {}
-
+  global F64_GLOBALS
   bpy.types.RenderEngine.f64_render_engine = bpy.props.PointerProperty(type=Fast64RenderEngine)
   for panel in get_panels():
     panel.COMPAT_ENGINES.add('FAST64_RENDER_ENGINE')
@@ -582,10 +698,9 @@ def register():
 
   bpy.types.VIEW3D_HT_header.append(draw_render_settings)
 
-def unregister():
-  global f64render_meshCache
-  f64render_meshCache = {}
+  F64_GLOBALS.clear()
 
+def unregister():
   bpy.types.VIEW3D_HT_header.remove(draw_render_settings)
 
   del bpy.types.RenderEngine.f64_render_engine

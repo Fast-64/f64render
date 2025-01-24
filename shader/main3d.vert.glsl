@@ -5,12 +5,19 @@ void main()
   vec3 norm = inNormal;
   vec3 normScreen = normalize(matNorm * norm);
 
+#if VIEWSPACE_LIGHTING
+  vec3 light_norm = normScreen;
+#else 
+  vec3 light_norm = norm;
+#endif
+
   cc_shade = inColor;
 
   vec4 lightTotal = vec4(material.ambientColor.rgb, 0.0);
-  for(int i=0; i<2; ++i) {
-    float lightStren = max(dot(norm, material.lightDir[i].xyz), 0.0);
-    lightTotal += material.lightColor[i] * lightStren;
+  for(int i=0; i<NUM_LIGHTS; i++) {
+    Light light = material.lights[i];
+    float lightStren = max(dot(light_norm, light.dir), 0.0);
+    lightTotal += light.color * lightStren;
   }
 
   lightTotal.rgb = clamp(lightTotal.rgb, 0.0, 1.0);

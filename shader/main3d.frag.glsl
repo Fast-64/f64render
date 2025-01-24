@@ -81,8 +81,8 @@ vec3 cc_fetchColor(in int val, in vec4 shade, in vec4 comb, in vec4 texData0, in
   // else if(val == CC_C_LOD_FRAC   ) return vec3(0.0); // @TODO
   else if(val == CC_C_PRIM_LOD_FRAC) return vec3(material.primLodDepth[1]);
   else if(val == CC_C_NOISE      ) return vec3(noise(posScreen*0.25));
-  else if(val == CC_C_K4         ) return vec3(material.k_45[0]);
-  else if(val == CC_C_K5         ) return vec3(material.k_45[1]);
+  else if(val == CC_C_K4         ) return vec3(K45[0]);
+  else if(val == CC_C_K5         ) return vec3(K45[1]);
   else if(val == CC_C_1          ) return vec3(1.0);
   return vec3(0.0); // default: CC_C_0
 }

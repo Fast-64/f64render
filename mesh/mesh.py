@@ -128,4 +128,4 @@ def mesh_to_buffers(mesh: bpy.types.Mesh) -> MeshBuffers:
 
   print(" - Mesh", (time.process_time() - tDes) * 1000)
 
-  return MeshBuffers(positions, colors, uvs, normals, index_array, index_offsets, None, None, None, None, None)
+  return MeshBuffers(positions, colors, uvs, normals, index_array, index_offsets, None, None, None, None)
