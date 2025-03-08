@@ -1,6 +1,4 @@
-from dataclasses import dataclass
-
-import numpy as np
+import functools
 
 BL_INP = {
   "G_BL_0"      : 0,
@@ -16,5 +14,6 @@ BL_INP = {
   "G_BL_A_MEM"  : 10,
 }
 
-def get_blender_settings(rendermode) -> tuple:
-  return tuple(BL_INP[x] for x in rendermode.blend_cycle1 + rendermode.blend_cycle2)
+@functools.cache
+def get_blender_settings(blend_cycle1: str, blend_cycle2: str) -> tuple:
+  return tuple(BL_INP[x] for x in blend_cycle1 + blend_cycle2)

@@ -22,6 +22,7 @@ class MeshBuffers:
     mat_data: list[np.ndarray]
     ubo_mat_data: list[gpu.types.GPUUniformBuf]
     materials: list[F64Material] = None
+    bounding_box: np.ndarray = None
     mesh_name: str = "" # multiple obj. can share the same mesh, store to allow deletion by name
 
 # Converts a blender mesh into buffers to be used by the GPU renderer
@@ -128,4 +129,4 @@ def mesh_to_buffers(mesh: bpy.types.Mesh) -> MeshBuffers:
 
   print(" - Mesh", (time.process_time() - tDes) * 1000)
 
-  return MeshBuffers(positions, colors, uvs, normals, index_array, index_offsets, None, None, None, None)
+  return MeshBuffers(positions, colors, uvs, normals, index_array, index_offsets, None, None, None, None, None)

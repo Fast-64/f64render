@@ -4,6 +4,7 @@ from typing import NamedTuple
 import bpy
 import mathutils
 import gpu
+import numpy as np
 
 from .utils.addon import addon_set_fast64_path
 from .mesh.gpu_batch import create_vert_buf, batch_for_shader
@@ -46,6 +47,15 @@ def get_struct_ubo_size(s: struct.Struct):
   return (s.size + 15) & ~15 # force 16-byte alignment
 
 FALLBACK_MATERIAL = F64Material(state=F64RenderState(cc=SOLID_CC), tile_conf=(0, ) * 16)
+
+FRUSTUM_PLANES = np.array( # left, right, bottom, top, near, far
+  [[-1, 0, 0],
+  [1, 0, 0],
+  [0, -1, 0],
+  [0, 1, 0],
+  [0, 0, -1],
+  [0, 0, 1]]
+)
 
 def cache_del_by_mesh(mesh_name):
   global F64_GLOBALS
@@ -343,9 +353,14 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
 
   def view_draw(self, context, depsgraph):
     self.draw_scene(context, depsgraph)
+    return # uncomment to profile individual functions
+    from cProfile import Profile
+    from pstats import SortKey, Stats
+    with Profile() as profile:
+      self.draw_scene(context, depsgraph)
+      Stats(profile).strip_dirs().sort_stats(SortKey.CUMULATIVE).print_stats()
 
   def draw_scene(self, context, depsgraph):
-    from fast64_internal.utility import get_blender_to_game_scale
     global F64_GLOBALS
     
     # TODO: fixme, after reloading this script during dev, something calls this function
@@ -377,9 +392,9 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
 
     # global params
     f64render_rs: F64RenderSettings = depsgraph.scene.f64render.render_settings
-    fast64_rs = depsgraph.scene.fast64.renderSettings
     set_light_dir = materials_set_light_direction(depsgraph.scene)
     always_set = f64render_rs.always_set
+    projection_matrix, view_matrix = context.region_data.perspective_matrix, context.region_data.view_matrix
 
     # Note: space conversion to Y-up happens indirectly during the normal matrix calculation
   
@@ -405,6 +420,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
 
           renderObj = F64_GLOBALS.meshCache[meshID] = mesh_to_buffers(mesh)
           renderObj.mesh_name = obj.data.name
+          renderObj.bound_box = np.array([[*corner, 1] for corner in obj.bound_box])
 
           mat_count = max(len(obj.material_slots), 1)
           vert_buf = create_vert_buf(self.vbo_format,
@@ -450,9 +466,8 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
         render_obj: MeshBuffers = F64_GLOBALS.meshCache[meshID]
 
         modelview_matrix = obj.matrix_world
-        projection_matrix = context.region_data.perspective_matrix
         mvp_matrix = projection_matrix @ modelview_matrix
-        normal_matrix = (context.region_data.view_matrix @ obj.matrix_world).to_3x3().inverted().transposed()
+        normal_matrix = (view_matrix @ obj.matrix_world).to_3x3().inverted().transposed()
 
         info = ObjRenderInfo(obj, mvp_matrix, normal_matrix, render_obj, [])
         objs_info.append(info)
@@ -485,8 +500,21 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     gpu.state.depth_test_set('NONE')
     gpu.state.depth_mask_set(False)
     gpu.state.blend_set("NONE")
+        
+    def check_frustum(info: ObjRenderInfo):
+      mvp = np.array(info.mvp_matrix)
+      bbox = (mvp @ info.render_obj.bound_box.T).T  # apply view and projection
+      bbox = bbox[:, :3] / bbox[:, 3, None]  # perspective divide
+
+      # check if all corners are outside any plane, TODO: is this the best impl?
+      return not (np.abs(bbox @ FRUSTUM_PLANES.T) > 1).all()
 
     def draw_obj(render_state: F64RenderState, info: ObjRenderInfo):
+      if not check_frustum(info):
+        if not info.obj.use_f3d_culling: # if obj is not meant to be culled in game, apply all materials
+          for mat_idx, indices_count, f64mat in info.mats: render_state.set_if_not_none(f64mat.state)
+        return
+
       self.shader.uniform_float("matMVP", info.mvp_matrix)
       self.shader.uniform_float("matNorm", info.normal_matrix)
 
@@ -529,8 +557,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
         
         info.render_obj.ubo_mat_data[mat_idx].update(info.render_obj.mat_data[mat_idx])                        
         self.shader.uniform_block("material", info.render_obj.ubo_mat_data[mat_idx])
-        
-        # @TODO: frustum-culling (blender doesn't do it)
+
         if self.draw_range_impl:
           info.render_obj.batch.draw_range(self.shader, elem_start=info.render_obj.index_offsets[mat_idx] * 3, elem_count=indices_count)
         else:

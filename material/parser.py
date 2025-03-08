@@ -183,7 +183,7 @@ class F64RenderState:
     new.lights = copy.copy(self.lights)
     return new
 
-  def set_if_not_none(self, other: "F64RenderState"):    
+  def set_if_not_none(self, other: "F64RenderState"):
     for light, other_light in zip(self.lights, other.lights):
       if other_light is None: continue
       light.color = other_light.color
@@ -194,7 +194,7 @@ class F64RenderState:
       if value is not None: setattr(self, attr, value)
 
   def set_from_rendermode(self, rendermode: RenderMode):
-    self.render_mode = F64Rendermode(get_blender_settings(rendermode),  depth_write=rendermode.z_upd)
+    self.render_mode = F64Rendermode(get_blender_settings(rendermode.blend_cycle1, rendermode.blend_cycle2),  depth_write=rendermode.z_upd)
     if rendermode.zmode == 'ZMODE_DEC':
       self.render_mode.depth_test = 'EQUAL'
       self.render_mode.flags |= DRAW_FLAG_DECAL
