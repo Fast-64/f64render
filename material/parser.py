@@ -242,7 +242,8 @@ def f64_material_parse(f3d_mat: any, always_set: bool, set_light_dir: bool) -> F
   if always_set or (f3d_mat.set_prim and cc_uses['Primitive']): 
     state.prim_color = quantize_srgb(f3d_mat.prim_color)
     state.prim_lod = (f3d_mat.prim_lod_min, f3d_mat.prim_lod_frac)
-  if always_set or (f3d_mat.set_env and cc_uses['Environment']): state.env_color = quantize_srgb(f3d_mat.env_color)
+  if always_set or (f3d_mat.set_env and cc_uses['Environment']): 
+    state.env_color = quantize_srgb(f3d_mat.env_color)
   if always_set or (f3d_mat.set_key and cc_uses['Key']): # extra 0 for alignment
     state.ck = tuple((*quantize_srgb(f3d_mat.key_center, force_alpha=True), *f3d_mat.key_scale, 0))
   if always_set or (f3d_mat.set_k0_5 and cc_uses['Convert']): 
