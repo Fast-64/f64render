@@ -11,12 +11,15 @@ vec3 linearToGamma(in vec3 color)
 }
 
 #define mixSelect(amount, a, b) (mix(a, b, float(amount)))
-#define flagSelect(flag_mask, a, b) (mixSelect((DRAW_FLAGS & flag_mask) != 0, a, b))
-#define geoModeSelect(flag_mask, a, b) (mixSelect((GEO_MODE & flag_mask) != 0, a, b))
-#define othermodeHSelect(flag_mask, a, b) mixSelect((material.othermodeH & flag_mask) != 0, a, b)
+#define flagSelect(flags, flag_mask, a, b) (mixSelect((flags & flag_mask) != 0, a, b))
+#define drawFlagSelect(flag_mask, a, b) flagSelect(DRAW_FLAGS, flag_mask, a, b)
+#define geoModeSelect(flag_mask, a, b) flagSelect(GEO_MODE, flag_mask, a, b)
+#define othermodeHSelect(flag_mask, a, b) flagSelect(material.othermodeH, flag_mask, a, b)
 
-#define zSource() (OTHER_MODE_L & (1 << G_MDSFT_ZSRCSEL))
-#define texFilter() (OTHER_MODE_H & (2 << G_MDSFT_TEXTFILT))
+#define zSource()   (OTHER_MODE_L & (1 << G_MDSFT_ZSRCSEL))
+#define cycleType() (OTHER_MODE_H & (3 << G_MDSFT_CYCLETYPE))
+#define texFilter() (OTHER_MODE_H & (3 << G_MDSFT_TEXTFILT))
+#define textPersp() (OTHER_MODE_H & (1 << G_MDSFT_TEXTPERSP))
 
 #define boolSelect(cond, a, b) (bool(mix(a, b, cond)))
 
@@ -25,35 +28,28 @@ float noise(in vec2 uv)
   return fract(sin(dot(uv, vec2(12.9898, 78.233)))* 43758.5453);
 }
 
-vec4 mirrorUV(vec4 uvEnd, vec4 uvIn)
+vec2 mirrorUV(vec2 uvEnd, vec2 uvIn)
 {
-  vec4 uvMod2 = mod(uvIn, uvEnd * 2.0 + 1.0);
+  vec2 uvMod2 = mod(uvIn, uvEnd * 2.0 + 1.0);
   return mix(uvMod2, (uvEnd * 2.0) - uvMod2, step(uvEnd, uvMod2));
 }
 
-ivec4 wrappedMirror(ivec4 texSize, ivec4 uv)
+vec4 wrappedMirrorSample(const sampler2D tex, ivec2 uv, const vec2 mask, const vec2 highMinusLow,const  vec2 isClamp, const vec2 isMirror, const vec2 isForceClamp)
 {
-  vec4 mask = abs(material.mask);
+  const ivec2 texSize = textureSize(tex, 0);
 
-  // fetch settings
-  vec4 isClamp      = step(material.mask, vec4(1.0));
-  vec4 isMirror     = step(material.high, vec4(0.0));
-  vec4 isForceClamp = step(mask, vec4(1.0)); // mask == 0 forces clamping
-  mask = mix(mask, vec4(256), isForceClamp); // if mask == 0, we also have to ignore it
-
-  // @TODO: do this in vertex shader once initially
-  uv.yw = texSize.yw - uv.yw; // invert Y to have 0,0 in the top-left corner
-  
   // first apply clamping if enabled (clamp S/T, low S/T -> high S/T)
-  vec4 uvClamp = clamp(uv, vec4(0.0), tileSize);
-  uv = ivec4(mix(uv, uvClamp, isClamp));
+  const vec2 uvClamp = clamp(uv, vec2(0.0), highMinusLow);
+  uv = ivec2(mix(uv, uvClamp, isClamp));
 
   // then mirror the result if needed (mirror S/T)
-  vec4 uvMirror = mirrorUV(mask - vec4(0.5), vec4(uv));
-  uv = ivec4(mix(vec4(uv),  uvMirror, isMirror));
+  const vec2 uvMirror = mirrorUV(mask - vec2(0.5), vec2(uv));
+  uv = ivec2(mix(vec2(uv), uvMirror, isMirror));
   
   // clamp again (mask S/T), this is also done to avoid OOB texture access
-  uv = ivec4(mod(uv, min(texSize+1, mask)));
-  uv.yw = texSize.yw - uv.yw; // invert Y back
-  return uv;
+  uv = ivec2(mod(uv, min(texSize+1, mask)));
+
+  uv.y = texSize.y - uv.y - 1; // invert Y back
+
+  return texelFetch(tex, uv, 0);
 }

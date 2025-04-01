@@ -6,15 +6,20 @@ struct Light
   vec3 dir;
 };
 
+struct TileConf
+{
+  vec2 mask;  // clamped if < 0, mask = abs(mask)
+  vec2 shift;
+  vec2 low;
+  vec2 high;  // if negative, mirrored, high = abs(high)
+  int flags;  // TODO: correct impl of this would be to process textures ahead of time, but this has to be done in fast64 first
+};
+
 struct UBO_Material
 {
+  TileConf texConfs[8]; // TODO: should these two be part of seperate uniform buffers?
+  Light lights[8];
   ivec4 blender[2];
-
-  //Tile settings: xy = TEX0, zw = TEX1
-  vec4 mask; // clamped if < 0, mask = abs(mask)
-  vec4 shift;
-  vec4 low;
-  vec4 high; // if negative, mirrored, high = abs(high)
 
   // color-combiner
   ivec4 cc0Color;
@@ -23,22 +28,22 @@ struct UBO_Material
   ivec4 cc1Alpha;
 
   ivec4 modes; // geo, other-low, other-high, flags
-  Light lights[8];
+
   vec4 prim_color;
   vec4 primLodDepth;
   vec4 env;
   vec4 ambientColor;
-  vec4 ck_center;
-  vec4 ck_scale;
-  vec4 k_0123;
-  vec3 k45AlphaClip;
+  vec3 ck_center;
+  float alphaClip;
+  vec3 ck_scale;
   int numLights;
+  vec3 ck_width;
+  int uvBasis;
+  vec4 k_0123;
+  vec2 k45;
 };
 
 #define GEO_MODE     material.modes.x
 #define OTHER_MODE_L material.modes.y
 #define OTHER_MODE_H material.modes.z
 #define DRAW_FLAGS   material.modes.w
-#define ALPHA_CLIP   material.k45AlphaClip.z
-#define K45          material.k45AlphaClip.xy
-#define NUM_LIGHTS   material.numLights

@@ -14,52 +14,78 @@ vec4 quantize4Bit(in vec4 color) {
   return round(color * 16.0) / 16.0; // (16 seems more accurate than 15)
 }
 
-vec4 quantizeTexture0(vec4 color) {
-  vec4 colorQuant = flagSelect(DRAW_FLAG_TEX0_4BIT, color, quantize4Bit(color));
-  return flagSelect(DRAW_FLAG_TEX0_3BIT, colorQuant, quantize3Bit(colorQuant));
+vec4 quantizeTexture(int flags, vec4 color) {
+  vec4 colorQuant = flagSelect(flags, TEX_FLAG_4BIT, color, quantize4Bit(color));
+  colorQuant = flagSelect(flags, TEX_FLAG_3BIT, colorQuant, quantize3Bit(colorQuant));
+  return flagSelect(flags, TEX_FLAG_MONO, colorQuant.rgba, colorQuant.rrrr);
 }
 
-vec4 quantizeTexture1(vec4 color) {
-  vec4 colorQuant = flagSelect(DRAW_FLAG_TEX1_4BIT, color, quantize4Bit(color));
-  return flagSelect(DRAW_FLAG_TEX1_3BIT, colorQuant, quantize3Bit(colorQuant));
+vec4 sampleSampler(in const sampler2D tex, in const TileConf tileConf, in vec2 uvCoord, in const uint texFilter) {
+  // https://github.com/rt64/rt64/blob/61aa08f517cd16c1dbee4e097768b08e2a060307/src/shaders/TextureSampler.hlsli#L156-L276
+  // TODO: Next pixel cycle 1 bug, probably best to implement in some cpu pass for textures integrated into fast64 (same for quantization)
+  const ivec2 texSize = textureSize(tex, 0);
+
+  // Compensates the lack of perspective division for the UVs based on observed hardware behavior.
+#ifdef TEXTURE_RECT
+  const bool applyCorrection = true;
+#else
+  const bool applyCorrection = textPersp() == G_TP_PERSP;
+#endif
+
+  uvCoord.y = texSize.y - uvCoord.y; // invert Y
+  uvCoord *= (applyCorrection ? 1.0 : 2.0) * tileConf.shift;
+
+#ifdef SIMULATE_LOW_PRECISION
+  // Simulates the lower precision of the hardware's coordinate interpolation.
+  uvCoord = round(uvCoord * LOW_PRECISION) / LOW_PRECISION;
+#endif
+
+  uvCoord -= tileConf.low;
+  const ivec2 texelBaseInt = ivec2(floor(uvCoord));
+
+  const vec2 isClamp      = step(tileConf.mask, vec2(1.0));
+  const vec2 isMirror     = step(tileConf.high, vec2(0.0));
+  const vec2 isForceClamp = step(tileConf.mask, vec2(1.0)); // mask == 0 forces clamping
+  const vec2 mask = mix(abs(tileConf.mask), vec2(256), isForceClamp); // if mask == 0, we also have to ignore it
+  const vec2 highMinusLow = abs(tileConf.high) - abs(tileConf.low);
+
+  if (texFilter != G_TF_POINT) {
+    const vec4 sample00 = wrappedMirrorSample(tex, texelBaseInt,               mask, highMinusLow, isClamp, isMirror, isForceClamp);
+    const vec4 sample01 = wrappedMirrorSample(tex, texelBaseInt + ivec2(0, 1), mask, highMinusLow, isClamp, isMirror, isForceClamp);
+    const vec4 sample10 = wrappedMirrorSample(tex, texelBaseInt + ivec2(1, 0), mask, highMinusLow, isClamp, isMirror, isForceClamp);
+    const vec4 sample11 = wrappedMirrorSample(tex, texelBaseInt + ivec2(1, 1), mask, highMinusLow, isClamp, isMirror, isForceClamp);
+    const vec2 fracPart = uvCoord - texelBaseInt;
+#ifdef USE_LINEAR_FILTER
+    return quantizeTexture(tileConf.flags, mix(mix(sample00, sample10, fracPart.x), mix(sample01, sample11, fracPart.x), fracPart.y));
+#else
+    if (texFilter == G_TF_AVERAGE && all(lessThanEqual(vec2(1 / LOW_PRECISION), abs(fracPart - 0.5)))) {
+        return quantizeTexture(tileConf.flags, (sample00 + sample01 + sample10 + sample11) / 4.0f);
+    }
+    else {
+      // Originally written by ArthurCarvalho
+      // Sourced from https://www.emutalk.net/threads/emulating-nintendo-64-3-sample-bilinear-filtering-using-shaders.54215/
+      vec4 tri0 = mix(sample00, sample10, fracPart.x) + (sample01 - sample00) * fracPart.y;
+      vec4 tri1 = mix(sample11, sample01, 1.0 - fracPart.x) + (sample10 - sample11) * (1.0 - fracPart.y);
+      return quantizeTexture(tileConf.flags, mix(tri0, tri1, step(1.0, fracPart.x + fracPart.y)));
+    }
+#endif
+  }
+  else {
+    return quantizeTexture(tileConf.flags, wrappedMirrorSample(tex, texelBaseInt, mask, highMinusLow, isClamp, isMirror, isForceClamp));
+  }
 }
 
-void fetchTex01Filtered(in ivec4 texSize, out vec4 texData0, out vec4 texData1)
-{
-  // Original 3-point code taken from: https://www.shadertoy.com/view/Ws2fWV (By: cyrb)
-  ivec4 uv0 = ivec4(floor(uv));
-  vec4 ratio = uv - vec4(uv0);
-
-  ivec2 lower_flag = ivec2(step(0.0, ratio.xz - ratio.yw));
-  ivec4 corner = ivec4(
-    lower_flag.x, 1 - lower_flag.x,
-    lower_flag.y, 1 - lower_flag.y
-  );
-
-  ivec4 uv1 = uv0 + corner;
-  ivec4 uv2 = uv0 + 1;
-
-  uv0 = wrappedMirror(texSize, uv0);
-  uv1 = wrappedMirror(texSize, uv1);
-  uv2 = wrappedMirror(texSize, uv2);
-
-  vec4 v0 = vec4(0 - corner);
-  vec4 v1 = vec4(1 - corner);
-  vec4 v2 = ratio - vec4(corner);
-
-  vec2 den = v0.xw * v1.yz - v1.xw * v0.yz;
-
-  vec2 lambda1 = abs((v2.xz * v1.yw - v1.xz * v2.yw) / den);
-  vec2 lambda2 = abs((v0.xz * v2.yw - v2.xz * v0.yw) / den);
-  vec2 lambda0 = 1.0 - lambda1 - lambda2;
-
-  texData0 =  quantizeTexture0(texelFetch(tex0, uv1.xy, 0)) * lambda0.x
-            + quantizeTexture0(texelFetch(tex0, uv0.xy, 0)) * lambda1.x
-            + quantizeTexture0(texelFetch(tex0, uv2.xy, 0)) * lambda2.x;
-  
-  texData1 =  quantizeTexture1(texelFetch(tex1, uv1.zw, 0)) * lambda0.y
-            + quantizeTexture1(texelFetch(tex1, uv0.zw, 0)) * lambda1.y
-            + quantizeTexture1(texelFetch(tex1, uv2.zw, 0)) * lambda2.y;
+const sampler2D getTextureSampler(in const uint textureIndex) {
+  switch (textureIndex) {
+    default: return tex0;
+    case 1: return tex1;
+    case 2: return tex2;
+    case 3: return tex3;
+    case 4: return tex4;
+    case 5: return tex5;
+    case 6: return tex6;
+    case 7: return tex7;
+  }
 }
 
 vec3 cc_fetchColor(in int val, in vec4 shade, in vec4 comb, in vec4 texData0, in vec4 texData1)
@@ -71,7 +97,7 @@ vec3 cc_fetchColor(in int val, in vec4 shade, in vec4 comb, in vec4 texData0, in
   else if(val == CC_C_SHADE      ) return shade.rgb;
   else if(val == CC_C_ENV        ) return material.env.rgb;
   else if(val == CC_C_CENTER     ) return material.ck_center.rgb;
-  else if(val == CC_C_SCALE      ) return material.ck_scale.rgb;
+  else if(val == CC_C_SCALE      ) return material.ck_scale;
   else if(val == CC_C_COMB_ALPHA ) return comb.aaa;
   else if(val == CC_C_TEX0_ALPHA ) return texData0.aaa;
   else if(val == CC_C_TEX1_ALPHA ) return texData1.aaa;
@@ -81,8 +107,8 @@ vec3 cc_fetchColor(in int val, in vec4 shade, in vec4 comb, in vec4 texData0, in
   // else if(val == CC_C_LOD_FRAC   ) return vec3(0.0); // @TODO
   else if(val == CC_C_PRIM_LOD_FRAC) return vec3(material.primLodDepth[1]);
   else if(val == CC_C_NOISE      ) return vec3(noise(posScreen*0.25));
-  else if(val == CC_C_K4         ) return vec3(K45[0]);
-  else if(val == CC_C_K5         ) return vec3(K45[1]);
+  else if(val == CC_C_K4         ) return vec3(material.k45[0]);
+  else if(val == CC_C_K5         ) return vec3(material.k45[1]);
   else if(val == CC_C_1          ) return vec3(1.0);
   return vec3(0.0); // default: CC_C_0
 }
@@ -192,36 +218,20 @@ bool color_depth_blending(
 
 void main()
 {
+  const uint cycleType = cycleType();
+  const uint texFilter = texFilter();
   vec4 cc0[4]; // inputs for 1. cycle
   vec4 cc1[4]; // inputs for 2. cycle
   vec4 ccValue = vec4(0.0); // result after 1/2 cycle
 
-  vec4 uvTex = uv;
-
   vec4 ccShade = geoModeSelect(G_SHADE_SMOOTH, cc_shade_flat, cc_shade);
 
-  // pre-calc UVs for both textures + get two extra points for 3-point sampling
-  // then sample both textures even if none are used. This is done to vectorize both
-  // the UV and clamp/mirror calculations, as well as minimize the number of texture fetches
-  vec4 texData0, texData1;
-  ivec4 texSize = ivec4(textureSize(tex0, 0), textureSize(tex1, 0)) - 1;
+  const vec2 uvCoord = inputUV * textureSize(getTextureSampler(material.uvBasis), 0);
+  vec4 texData0 = sampleSampler(getTextureSampler(0), material.texConfs[0], uvCoord, texFilter);
+  vec4 texData1 = sampleSampler(getTextureSampler(1), material.texConfs[1], uvCoord, texFilter);
 
-  if(texFilter() == G_TF_BILERP)
-  {
-    fetchTex01Filtered(texSize, texData0, texData1);
-  } else {
-    ivec4 uv0 = ivec4(floor(uv + 0.5));
-    uv0 = wrappedMirror(texSize, uv0);
-
-    texData0 = quantizeTexture0(texelFetch(tex0, uv0.xy, 0));
-    texData1 = quantizeTexture0(texelFetch(tex1, uv0.zw, 0));
-  }
-
-  // handle I4/I8
   texData0.rgb = linearToGamma(texData0.rgb);
   texData1.rgb = linearToGamma(texData1.rgb);
-  texData0.rgba = flagSelect(DRAW_FLAG_TEX0_MONO, texData0.rgba, texData0.rrrr);
-  texData1.rgba = flagSelect(DRAW_FLAG_TEX1_MONO, texData1.rgba, texData1.rrrr);
 
   // @TODO: emulate other formats, e.g. quantization?
 
@@ -237,7 +247,7 @@ void main()
 
   ccValue = cc_overflowValue((cc0[0] - cc0[1]) * cc0[2] + cc0[3]);
 
-  if((OTHER_MODE_H & G_CYC_2CYCLE) != 0) {
+  if(cycleType == G_CYC_2CYCLE) {
     cc1[0].rgb = cc_fetchColor(material.cc1Color.x, ccShade, ccValue, texData0, texData1);
     cc1[1].rgb = cc_fetchColor(material.cc1Color.y, ccShade, ccValue, texData0, texData1);
     cc1[2].rgb = cc_fetchColor(material.cc1Color.z, ccShade, ccValue, texData0, texData1);
@@ -254,7 +264,7 @@ void main()
   ccValue = cc_clampValue(cc_overflowValue(ccValue));
   ccValue.rgb = gammaToLinear(ccValue.rgb);
 
-  bool alphaTestFailed = ccValue.a < ALPHA_CLIP;
+  bool alphaTestFailed = ccValue.a < material.alphaClip;
 #ifdef BLEND_EMULATION
   // Depth / Decal handling:
   // We manually write & check depth values in an image in addition to the actual depth buffer.
@@ -267,7 +277,7 @@ void main()
   ivec2 screenPosPixel = ivec2(trunc(gl_FragCoord.xy));
 
   int currDepth = int(mixSelect(zSource() == G_ZS_PRIM, gl_FragCoord.w * 0xFFFFF, material.primLodDepth.z));
-  int writeDepth = int(flagSelect(DRAW_FLAG_DECAL, currDepth, -0xFFFFFF));
+  int writeDepth = int(drawFlagSelect(DRAW_FLAG_DECAL, currDepth, -0xFFFFFF));
 
   if((DRAW_FLAGS & DRAW_FLAG_ALPHA_BLEND) != 0) {
     writeDepth = -0xFFFFFF;

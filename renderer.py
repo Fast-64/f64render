@@ -9,53 +9,49 @@ import numpy as np
 from .utils.addon import addon_set_fast64_path
 from .mesh.gpu_batch import create_vert_buf, batch_for_shader
 from .material.parser import (
-  F64Material, 
-  f64_material_parse, 
-  f64_parse_obj_light, 
-  node_material_parse, 
+  f64_material_parse,
+  f64_parse_obj_light,
+  node_material_parse,
   parse_f3d_rendermode_preset,
-  quantize_direction, 
-  quantize_srgb, 
-  F64RenderState, 
+  quantize,
+  quantize_direction,
+  quantize_srgb,
+  F64Material,
+  F64RenderState,
   F64Rendermode,
-  F64Light
+  F64Light,
+  quantize_tuple,
 )
 from .material.cc import SOLID_CC
+from .material.tile import get_tile_conf
 from .mesh.mesh import MeshBuffers, mesh_to_buffers
 from .f64_globals import F64_GLOBALS
+from .properties import F64RenderProperties, F64RenderSettings, TextureProperty
 
 # N64 is y-up, blender is z-up
 yup_to_zup = mathutils.Quaternion((1, 0, 0), math.radians(90.0)).to_matrix().to_4x4()
 
 MISSING_TEXTURE_COLOR = (0, 0, 0, 1)
 
-LIGHT_STRUCT = "4f 3f 4x " # color, direction, padding
+LIGHT_STRUCT = "4f 3f 4x"           # color, direction, padding
+TILE_STRUCT = "2f 2f 2f 2f i 12x"    # mask, shift, low, high, padding, flags
 
 UNIFORM_BUFFER_STRUCT = struct.Struct(
-  "8i"              # blender
-  "16f"             # tile settings (mask/shift/low/high)
-  "16i"             # color-combiner settings
-  "i i i i" +       # geoMode, other-low, other-high, flags
-  (LIGHT_STRUCT * 8)# lights
-  + "4f 4f 4f 4f"   # prim, prim_lod, prim-depth, env, ambient
-  "8f"              # ck center/scale,
-  "6f f 4x"         # k0-k5, alpha clip, padding
-  "i"               # light count
+  (TILE_STRUCT * 8) +               # texture configurations
+  (LIGHT_STRUCT * 8) +              # lights
+  "8i"                              # blender
+  "16i"                             # color-combiner settings
+  "i i i i"                         # geoMode, other-low, other-high, flags
+  "4f 4f 4f 4f"                     # prim, prim_lod, prim-depth, env, ambient
+  "3f f 3f i 3f"                    # ck center, alpha clip, ck scale, light count, width,
+  "i"                               # uv basis
+  "6f"                              # k0-k5
 )
 
 def get_struct_ubo_size(s: struct.Struct):
   return (s.size + 15) & ~15 # force 16-byte alignment
 
-FALLBACK_MATERIAL = F64Material(state=F64RenderState(cc=SOLID_CC), tile_conf=(0, ) * 16)
-
-FRUSTUM_PLANES = np.array( # left, right, bottom, top, near, far
-  [[-1, 0, 0],
-  [1, 0, 0],
-  [0, -1, 0],
-  [0, 1, 0],
-  [0, 0, -1],
-  [0, 0, 1]]
-)
+FALLBACK_MATERIAL = F64Material(state=F64RenderState(cc=SOLID_CC))
 
 def cache_del_by_mesh(mesh_name):
   global F64_GLOBALS
@@ -80,14 +76,14 @@ def get_scene_render_state(scene: bpy.types.Scene):
     ambient_color=quantize_srgb(fast64_rs.ambientColor, force_alpha=True),
     light_count=2,
     prim_color=quantize_srgb(f64render_rs.default_prim_color),
-    prim_lod=(0, 0),
+    prim_lod=(f64render_rs.default_lod_min, f64render_rs.default_lod_frac),
     env_color=quantize_srgb(f64render_rs.default_env_color),
-    ck=(0, 0, 0, 0, 0, 0, 0, 0),
-    convert=(0, 0, 0, 0, 0, 0),
-    prim_depth=(0, 0), # TODO: use world settings
+    ck=tuple((*quantize_srgb(f64render_rs.default_key_center, False), *f64render_rs.default_key_scale, *f64render_rs.default_key_width)),
+    convert=quantize_tuple(f64render_rs.default_convert, 9.0, -1.0, 1.0),
     cc=SOLID_CC,
     alpha_clip=-1,
     render_mode=F64Rendermode(),
+    tex_confs=([get_tile_conf(getattr(f64render_rs, f"default_tex{i}")) for i in range(0, 8)]),
   )
   state.lights[0] = F64Light(quantize_srgb(fast64_rs.light0Color, force_alpha=True), quantize_direction(fast64_rs.light0Direction))
   state.lights[1] = F64Light(quantize_srgb(fast64_rs.light1Color, force_alpha=True), quantize_direction(fast64_rs.light1Direction))
@@ -236,9 +232,8 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
       vert_out = gpu.types.GPUStageInterfaceInfo("vert_interface")
       vert_out.no_perspective("VEC4", "cc_shade")
       vert_out.flat("VEC4", "cc_shade_flat")
-      vert_out.smooth("VEC4", "uv")
+      vert_out.smooth("VEC2", "inputUV")
       vert_out.no_perspective("VEC2", "posScreen")
-      vert_out.flat("VEC4", "tileSize")
 
       if self.shader_info_img_impl:
         shader_info.define("depth_unchanged", "depth_any")
@@ -248,6 +243,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
       # Using the already calculated view space normals instead of transforming the light direction makes
       # for cleaner and faster code
       shader_info.define("VIEWSPACE_LIGHTING", "0" if self.world_lighting else "1")
+      shader_info.define("SIMULATE_LOW_PRECISION", "1")
 
       shader_info.push_constant("MAT4", "matMVP")
       shader_info.push_constant("MAT3", "matNorm")
@@ -260,8 +256,8 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
       shader_info.vertex_in(3, "VEC2", "inUV")
       shader_info.vertex_out(vert_out)
       
-      shader_info.sampler(0, "FLOAT_2D", "tex0")
-      shader_info.sampler(1, "FLOAT_2D", "tex1")
+      for i in range(8):
+        shader_info.sampler(i, "FLOAT_2D", f"tex{i}")
       
       if self.shader_info_img_impl:
         shader_info.image(2, 'R32UI', "UINT_2D_ATOMIC", "color_texture", qualifiers={"READ", "WRITE"})
@@ -312,12 +308,12 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     global F64_GLOBALS
     # print("################ MESH CHANGE LISTENER ################")  
 
-    if depsgraph.id_type_updated('SCENE'):
-      if F64_GLOBALS.current_ucode != depsgraph.scene.f3d_type:
-        F64_GLOBALS.materials_cache = {}
-        F64_GLOBALS.current_ucode = depsgraph.scene.f3d_type
-
     for update in depsgraph.updates:
+      if isinstance(update.id, bpy.types.Scene):
+        if F64_GLOBALS.current_ucode != update.id.f3d_type:
+          F64_GLOBALS.materials_cache = {}
+          F64_GLOBALS.current_ucode = update.id.f3d_type
+        F64_GLOBALS.area_lookup = None # reset area lookup to refresh initial render state, is this the best approach?
       if isinstance(update.id, bpy.types.Material) and update.id in F64_GLOBALS.materials_cache:
         F64_GLOBALS.materials_cache.pop(update.id)
       is_obj_update = isinstance(update.id, bpy.types.Object)
@@ -500,14 +496,20 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     gpu.state.depth_test_set('NONE')
     gpu.state.depth_mask_set(False)
     gpu.state.blend_set("NONE")
+
+    textures_being_used = [None] * 8 # keep track of what is in each texture sampler
         
     def check_frustum(info: ObjRenderInfo):
       mvp = np.array(info.mvp_matrix)
       bbox = (mvp @ info.render_obj.bound_box.T).T  # apply view and projection
       bbox = bbox[:, :3] / bbox[:, 3, None]  # perspective divide
 
-      # check if all corners are outside any plane, TODO: is this the best impl?
-      return not (np.abs(bbox @ FRUSTUM_PLANES.T) > 1).all()
+      # check if any orientation (so [:, :3]) of all corners is fully outside the -1 to 1 range
+      if (np.all(bbox[:, 0] < -1) or np.all(bbox[:, 0] > 1) or
+        np.all(bbox[:, 1] < -1) or np.all(bbox[:, 1] > 1) or
+        np.all(bbox[:, 2] < -1) or np.all(bbox[:, 2] > 1)):
+        return False  # The object is completely outside the frustum
+      return True
 
     def draw_obj(render_state: F64RenderState, info: ObjRenderInfo):
       if not check_frustum(info):
@@ -527,32 +529,41 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
           gpu.state.depth_test_set(render_state.render_mode.depth_test)
           gpu.state.depth_mask_set(render_state.render_mode.depth_write)
 
-        if f64mat.tex0Buff: self.shader.uniform_sampler("tex0", f64mat.tex0Buff)
-        if f64mat.tex1Buff: self.shader.uniform_sampler("tex1", f64mat.tex1Buff)
+        for i in range(8):
+          if render_state.tex_confs[i].buff is not textures_being_used[i]: 
+            self.shader.uniform_sampler(f"tex{i}", render_state.tex_confs[i].buff)
+            textures_being_used[i] = render_state.tex_confs[i].buff
 
         light_data = []
         for l in render_state.lights[:render_state.light_count]:
           light_data.extend(l.color)
           light_data.extend(l.direction)
         light_data.extend([0.0] * ((8 - render_state.light_count) * 7))
+
+        tex_data = []
+        for t in render_state.tex_confs: tex_data.extend(t.values)
+
         info.render_obj.mat_data[mat_idx] = UNIFORM_BUFFER_STRUCT.pack(
+          *tex_data,
+          *light_data,
           *render_state.render_mode.blender,
-          *f64mat.tile_conf,
           *render_state.cc,
           f64mat.geo_mode,
           f64mat.othermode_l,
           f64mat.othermode_h,
           f64mat.flags | render_state.render_mode.flags,
-          *light_data,
           *render_state.prim_color,
           *render_state.prim_lod,
-          *render_state.prim_depth,
+          *f64mat.prim_depth,
           *render_state.env_color,
           *render_state.ambient_color,
-          *render_state.ck,
-          *render_state.convert,
+          *render_state.ck[:3],
           render_state.alpha_clip,
+          *render_state.ck[3:6],
           render_state.light_count,
+          *render_state.ck[6:9],
+          f64mat.uv_basis,
+          *render_state.convert,
         )
         
         info.render_obj.ubo_mat_data[mat_idx].update(info.render_obj.mat_data[mat_idx])                        
@@ -620,9 +631,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     gpu.state.depth_test_set('LESS')
     gpu.state.depth_mask_set(False)
 
-    if self.shader_info_img_impl:
-      self.init_shader_2d()
-
+    self.init_shader_2d()
     self.shader_2d.bind()
     
     # @TODO: why can't i cache this?
@@ -635,43 +644,9 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
 
     #print("Time 2D (ms)", (time.process_time() - t) * 1000)
 
-def update_all_materials(_scene, _context):
-  global F64_GLOBALS
-  F64_GLOBALS.materials_cache = {}
-
 def reset_area_lookup(_scene, _context):
   global F64_GLOBALS
   F64_GLOBALS.area_lookup = None
-
-class F64RenderSettings(bpy.types.PropertyGroup):
-  default_prim_color: bpy.props.FloatVectorProperty(
-    name="Default Prim Color",
-    default=(1, 1, 1, 1),
-    subtype="COLOR",
-    size=4,
-    min=0,
-    max=1
-  )
-  default_env_color: bpy.props.FloatVectorProperty(
-    name="Default Env Color",
-    default=(0.5, 0.5, 0.5, 0.5),
-    subtype="COLOR",
-    size=4,
-    min=0,
-    max=1
-  )
-  always_set: bpy.props.BoolProperty(name="Ignore \"Set (Source)\"", update=update_all_materials)
-  sm64_render_type: bpy.props.EnumProperty(
-    name="Render Objects", 
-    items=[
-      ("DEFAULT", "Always Draw", "Always Draw"), 
-      ("IGNORE", "Respect \"Ignore Render\"", "Respect \"Ignore Render\""), 
-      ("COLLISION", "Only Collision", "Collision")
-    ],
-  )
-
-class F64RenderProperties(bpy.types.PropertyGroup):
-  render_settings: bpy.props.PointerProperty(type=F64RenderSettings)
 
 class F64RenderSettingsPanel(bpy.types.Panel):
   bl_label = "f64render"
@@ -680,14 +655,8 @@ class F64RenderSettingsPanel(bpy.types.Panel):
   bl_region_type = "WINDOW"
 
   def draw(self, context):
-    layout = self.layout.column()
     f64render_rs: F64RenderSettings = context.scene.f64render.render_settings
-    layout.prop(f64render_rs, "default_prim_color")
-    layout.prop(f64render_rs, "default_env_color")
-    layout.separator()
-    layout.prop(f64render_rs, "always_set")
-    if context.scene.gameEditorMode == "SM64":
-      layout.prop(f64render_rs, "sm64_render_type")
+    f64render_rs.draw_props(self.layout, context.scene.gameEditorMode)
 
 def draw_render_settings(self, context):
   if context.scene.render.engine == Fast64RenderEngine.bl_idname:

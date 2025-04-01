@@ -5,10 +5,8 @@ import functools
 import bpy
 import mathutils
 import numpy as np
-import gpu
-import time
 
-from .tile import get_tile_conf
+from .tile import get_tile_conf, F64Texture
 from .cc import SOLID_CC, get_cc_settings
 from .blender import get_blender_settings
 from ..f64_globals import F64_GLOBALS
@@ -20,6 +18,13 @@ def quantize(x: float, bits: int, mi=0.0, ma=1.0): # quantize in a range
   return mi + round((x - mi) / range_size * value_count) / value_count * range_size
 
 @functools.cache
+def quantize_tuple_cached(t: tuple, bits: int, mi=0.0, ma=1.0):
+  return tuple(quantize(x, bits, mi, ma) for x in t)
+
+def quantize_tuple(t, bits: int, mi=0.0, ma=1.0):
+  return quantize_tuple_cached(tuple(t), bits, mi, ma)
+
+@functools.cache
 def quantize_srgb_cached(linear_color: tuple, include_alpha: bool, force_alpha: bool):
   result = list(mathutils.Color(linear_color[:3]).from_scene_linear_to_srgb())
   if include_alpha or force_alpha:
@@ -27,9 +32,9 @@ def quantize_srgb_cached(linear_color: tuple, include_alpha: bool, force_alpha: 
       result.append(linear_color[3])
     else:
       result.append(1.0)
-  return tuple(quantize(x, 8) for x in result)
+  return quantize_tuple(result, 8)
 
-def quantize_srgb(linear_color, include_alpha=True, force_alpha=True): # caching this makes it basically free in subsequent frames
+def quantize_srgb(linear_color, include_alpha=True, force_alpha=False): # caching this makes it basically free in subsequent frames
   return quantize_srgb_cached(tuple(linear_color), include_alpha, force_alpha)
 
 GEO_MODE_ATTRS = [
@@ -73,14 +78,8 @@ OTHERMODE_H_ATTRS = [
   # tlut
 ]
 
-DRAW_FLAG_TEX0_MONO    = (1 << 1)
-DRAW_FLAG_TEX1_MONO    = (1 << 2)
-DRAW_FLAG_DECAL        = (1 << 3)
-DRAW_FLAG_ALPHA_BLEND  = (1 << 4)
-DRAW_FLAG_TEX0_4BIT    = (1 << 5)
-DRAW_FLAG_TEX1_4BIT    = (1 << 6)
-DRAW_FLAG_TEX0_3BIT    = (1 << 7)
-DRAW_FLAG_TEX1_3BIT    = (1 << 8)
+DRAW_FLAG_DECAL        = (1 << 0)
+DRAW_FLAG_ALPHA_BLEND  = (1 << 1)
 
 @dataclass
 class RenderMode: # one class for all rendermodes
@@ -162,6 +161,7 @@ class F64Light:
 
 @dataclass
 class F64RenderState:
+  tex_confs: list[F64Texture] = None
   lights: list[F64Light|None] = None
   ambient_color: F64Color|None = None
   light_count: int|None = None
@@ -170,26 +170,28 @@ class F64RenderState:
   env_color: F64Color|None = None
   ck: tuple[float, float, float, float, float, float, float, float]|None = None
   convert: tuple[float, float, float, float, float, float]|None = None
-  prim_depth: tuple[float, float]|None = None
   cc: np.ndarray|None = None
   alpha_clip: float|None = None
   render_mode: F64Rendermode|None = None
 
   def __post_init__(self):
     if self.lights is None: self.lights = [None] * 8
+    if self.tex_confs is None: self.tex_confs = [None] * 8
 
   def copy(self):
     new = copy.copy(self)
     new.lights = copy.copy(self.lights)
     return new
 
-  def set_if_not_none(self, other: "F64RenderState"):
+  def set_if_not_none(self, other: "F64RenderState"): # TODO: optimize
     for light, other_light in zip(self.lights, other.lights):
       if other_light is None: continue
       light.color = other_light.color
       if other_light.direction is not None: light.direction = other_light.direction
+    for i, other_conf in enumerate(other.tex_confs):
+      if other_conf is not None: self.tex_confs[i] = other_conf
 
-    for attr in other.__dict__.keys() - ["lights"]:
+    for attr in NON_SPECIAL_KEYS:
       value = getattr(other, attr, None)
       if value is not None: setattr(self, attr, value)
 
@@ -204,19 +206,19 @@ class F64RenderState:
       self.render_mode.blend = "ALPHA"
       self.render_mode.flags |= DRAW_FLAG_ALPHA_BLEND
 
+NON_SPECIAL_KEYS = F64RenderState.__annotations__.keys() - ["lights", "tex_confs"]
 
 @dataclass
 class F64Material:
-    state: F64RenderState = dataclasses.field(default_factory=F64RenderState)
-    flags: int = 0
-    tile_conf: np.ndarray = None
-    cull: str = 'NONE'
-    geo_mode: int = 0
-    othermode_l: int = 0
-    othermode_h: int = 0
-    layer: int = 0
-    tex0Buff: gpu.types.GPUTexture = None
-    tex1Buff: gpu.types.GPUTexture = None
+  state: F64RenderState = dataclasses.field(default_factory=F64RenderState)
+  flags: int = 0
+  cull: str = 'NONE'
+  geo_mode: int = 0
+  othermode_l: int = 0
+  othermode_h: int = 0
+  prim_depth: tuple[float, float] = (0, 0)
+  layer: int = 0
+  uv_basis: int = 0
 
 def quantize_direction(direction):
   return tuple(quantize(x, 8, -1, 1) for x in direction)
@@ -235,6 +237,7 @@ def f64_material_parse(f3d_mat: any, always_set: bool, set_light_dir: bool) -> F
   from fast64_internal.f3d.f3d_writer import lightDataToObj
   cc_uses = all_combiner_uses(f3d_mat)
   rdp = f3d_mat.rdp_settings
+
   state = F64RenderState() # None equals not set
   f64mat = F64Material(state=state)
   if always_set or rdp.set_rendermode: state.set_from_rendermode(parse_f3d_mat_rendermode(f3d_mat))
@@ -245,8 +248,8 @@ def f64_material_parse(f3d_mat: any, always_set: bool, set_light_dir: bool) -> F
   if always_set or (f3d_mat.set_env and cc_uses['Environment']): 
     state.env_color = quantize_srgb(f3d_mat.env_color)
   if always_set or (f3d_mat.set_key and cc_uses['Key']): # extra 0 for alignment
-    state.ck = tuple((*quantize_srgb(f3d_mat.key_center, force_alpha=True), *f3d_mat.key_scale, 0))
-  if always_set or (f3d_mat.set_k0_5 and cc_uses['Convert']): 
+    state.ck = tuple((*quantize_srgb(f3d_mat.key_center, False), *f3d_mat.key_scale, *f3d_mat.key_width))
+  if always_set or (f3d_mat.set_k0_5 and cc_uses['Convert']):
     state.convert = tuple(getattr(f3d_mat, f"k{i}") for i in range(0, 6))
   if always_set or (cc_uses["Shade"] and rdp.g_lighting and f3d_mat.set_lights):
     state.ambient_color = quantize_srgb(f3d_mat.ambient_light_color, force_alpha=True)
@@ -265,11 +268,18 @@ def f64_material_parse(f3d_mat: any, always_set: bool, set_light_dir: bool) -> F
         f64_parse_obj_light(f64_light, obj, set_light_dir)
         light_index += 1
       state.light_count = light_index
- 
-  if f3d_mat.rdp_settings.g_cull_back: f64mat.cull = "BACK"
-  if f3d_mat.rdp_settings.g_cull_front: 
+  
+  f64mat.prim_depth = (rdp.prim_depth.z, rdp.prim_depth.dz)
+  if rdp.g_cull_back: f64mat.cull = "BACK"
+  if rdp.g_cull_front: 
     f64mat.cull = "BOTH" if f64mat.cull == "BACK" else "FRONT"
 
+  use_tex0, use_tex1 = f3d_mat.tex0.tex_set and cc_uses["Texture 0"], f3d_mat.tex1.tex_set and cc_uses["Texture 1"]
+  if use_tex0: state.tex_confs[0] = get_tile_conf(f3d_mat.tex0)
+  if use_tex1: state.tex_confs[1] = get_tile_conf(f3d_mat.tex1)
+  # TODO: use check for multitex function in glTF pr?
+  if use_tex0 and use_tex1: f64mat.uv_basis = int(f3d_mat.uv_basis.removeprefix("TEXEL"))
+  
   from fast64_internal.f3d.f3d_gbi import get_F3D_GBI
   from fast64_internal.f3d.f3d_material import get_textlut_mode
   gbi = get_F3D_GBI()
@@ -278,46 +288,18 @@ def f64_material_parse(f3d_mat: any, always_set: bool, set_light_dir: bool) -> F
   for i, attr in enumerate(GEO_MODE_ATTRS):
     if not getattr(gbi, attr.upper().replace("G_TEX_GEN", "G_TEXTURE_GEN").replace("G_SHADE_SMOOTH", "G_SHADING_SMOOTH"), False):
       continue
-    geo_mode |= int(getattr(f3d_mat.rdp_settings, attr)) << i
+    geo_mode |= int(getattr(rdp, attr)) << i
   for i, attr in enumerate(OTHERMODE_L_ATTRS):
-    othermode_l |= getattr(gbi, getattr(f3d_mat.rdp_settings, attr))
+    othermode_l |= getattr(gbi, getattr(rdp, attr))
   for i, attr in enumerate(OTHERMODE_H_ATTRS):
-    othermode_h |= getattr(gbi, getattr(f3d_mat.rdp_settings, attr))
+    othermode_h |= getattr(gbi, getattr(rdp, attr))
+  if rdp.g_mdsft_cycletype == 'G_CYC_COPY':
+    othermode_h ^= gbi.G_TF_BILERP | gbi.G_TF_AVERAGE
   othermode_h |= getattr(gbi, get_textlut_mode(f3d_mat))
   f64mat.geo_mode, f64mat.othermode_l, f64mat.othermode_h = geo_mode, othermode_l, othermode_h
   
   game_mode = bpy.context.scene.gameEditorMode
   f64mat.layer = int(getattr(f3d_mat.draw_layer, game_mode.lower(), None), 0)
-
-  # Note: doing 'gpu.texture.from_image' seems to cost nothing, caching is not needed
-  if f3d_mat.tex0.tex_set:
-    if f3d_mat.tex0.tex:
-      f64mat.tex0Buff = gpu.texture.from_image(f3d_mat.tex0.tex)
-      if f3d_mat.tex0.tex_format == 'I4' or f3d_mat.tex0.tex_format == 'I8':
-        f64mat.flags |= DRAW_FLAG_TEX0_MONO
-      if f3d_mat.tex0.tex_format == 'I4' or f3d_mat.tex0.tex_format == 'IA8':
-        f64mat.flags |= DRAW_FLAG_TEX0_4BIT
-      if f3d_mat.tex0.tex_format == 'IA4':
-        f64mat.flags |= DRAW_FLAG_TEX0_3BIT
-    else:
-      f64mat.tex0Buff = gpu.texture.from_image(bpy.data.images["f64render_missing_texture"])
-      f64mat.flags |= DRAW_FLAG_TEX0_MONO
-
-  if f3d_mat.tex1.tex_set:
-    if f3d_mat.tex1.tex:
-      f64mat.tex1Buff = gpu.texture.from_image(f3d_mat.tex1.tex)
-      if f3d_mat.tex1.tex_format == 'I4' or f3d_mat.tex1.tex_format == 'I8':
-        f64mat.flags |= DRAW_FLAG_TEX1_MONO
-      if f3d_mat.tex1.tex_format == 'I4' or f3d_mat.tex1.tex_format == 'IA8':
-        f64mat.flags |= DRAW_FLAG_TEX1_4BIT
-      if f3d_mat.tex1.tex_format == 'IA4':
-        f64mat.flags |= DRAW_FLAG_TEX1_3BIT
-    else:
-      f64mat.tex1Buff = gpu.texture.from_image(bpy.data.images["f64render_missing_texture"])
-      f64mat.flags |= DRAW_FLAG_TEX1_MONO
-
-
-  f64mat.tile_conf = get_tile_conf(f3d_mat)
 
   return f64mat
 
@@ -330,4 +312,4 @@ def node_material_parse(mat: bpy.types.Material) -> F64Material:
     if bsdf:
       color = quantize_srgb(bsdf.inputs['Base Color'].default_value)
 
-  return F64Material(F64RenderState(prim_color=color, cc=SOLID_CC), tile_conf=(0, ) * 16)
+  return F64Material(F64RenderState(prim_color=color, cc=SOLID_CC))
