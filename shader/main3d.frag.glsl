@@ -87,7 +87,7 @@ float computeLOD(inout uint tileIndex0, inout uint tileIndex1) {
   const bool lodDetail = texDetail == G_TD_DETAIL;
   const bool lodSharpDetail = lodSharpen || lodDetail;
 
-#ifdef GL_ARB_derivative_control // TODO: is dFdxCoarse more accurate than fine?
+#ifdef GL_ARB_derivative_control
   const vec2 dfd = abs(vec2(dFdxCoarse(inputUV.x), dFdyCoarse(inputUV.y)));
 #else
   const vec2 dfd = abs(vec2(dFdx(inputUV.x), dFdy(inputUV.y)));
