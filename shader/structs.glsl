@@ -29,18 +29,18 @@ struct UBO_Material
 
   ivec4 modes; // geo, other-low, other-high, flags
 
-  vec4 prim_color;
+  vec4 primColor;
   vec2 primLod; // x is frac, y is min
   vec2 primDepth;
   vec4 env;
   vec4 ambientColor;
-  vec3 ck_center;
+  vec3 ckCenter;
   float alphaClip;
-  vec3 ck_scale;
+  vec3 ckScale;
   uint numLights;
-  vec3 ck_width;
+  vec3 ckWidth;
   uint uvBasis;
-  vec4 k_0123;
+  vec4 k0123;
   vec2 k45;
   int mipCount;
 };

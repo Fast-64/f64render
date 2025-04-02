@@ -125,15 +125,15 @@ vec3 cc_fetchColor(in int val, in vec4 shade, in vec4 comb, in float lodFraction
        if(val == CC_C_COMB       ) return comb.rgb;
   else if(val == CC_C_TEX0       ) return texData0.rgb;
   else if(val == CC_C_TEX1       ) return texData1.rgb;
-  else if(val == CC_C_PRIM       ) return material.prim_color.rgb;
+  else if(val == CC_C_PRIM       ) return material.primColor.rgb;
   else if(val == CC_C_SHADE      ) return shade.rgb;
   else if(val == CC_C_ENV        ) return material.env.rgb;
-  else if(val == CC_C_CENTER     ) return material.ck_center.rgb;
-  else if(val == CC_C_SCALE      ) return material.ck_scale;
+  else if(val == CC_C_CENTER     ) return material.ckCenter.rgb;
+  else if(val == CC_C_SCALE      ) return material.ckScale;
   else if(val == CC_C_COMB_ALPHA ) return comb.aaa;
   else if(val == CC_C_TEX0_ALPHA ) return texData0.aaa;
   else if(val == CC_C_TEX1_ALPHA ) return texData1.aaa;
-  else if(val == CC_C_PRIM_ALPHA ) return material.prim_color.aaa;
+  else if(val == CC_C_PRIM_ALPHA ) return material.primColor.aaa;
   else if(val == CC_C_SHADE_ALPHA) return linearToGamma(shade.aaa);
   else if(val == CC_C_ENV_ALPHA  ) return material.env.aaa;
   else if(val == CC_C_LOD_FRAC   ) return vec3(lodFraction);
@@ -150,7 +150,7 @@ float cc_fetchAlpha(in int val, vec4 shade, in vec4 comb, in vec4 texData0, in v
        if(val == CC_A_COMB ) return comb.a;
   else if(val == CC_A_TEX0 ) return texData0.a;
   else if(val == CC_A_TEX1 ) return texData1.a;
-  else if(val == CC_A_PRIM ) return material.prim_color.a;
+  else if(val == CC_A_PRIM ) return material.primColor.a;
   else if(val == CC_A_SHADE) return shade.a;
   else if(val == CC_A_ENV  ) return material.env.a;
   // else if(val == CC_A_LOD_FRAC) return 0.0; // @TODO
