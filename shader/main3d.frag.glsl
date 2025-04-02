@@ -28,15 +28,8 @@ vec4 sampleSampler(in const sampler2D tex, in const TileConf tileConf, in vec2 u
   // https://github.com/rt64/rt64/blob/61aa08f517cd16c1dbee4e097768b08e2a060307/src/shaders/TextureSampler.hlsli#L156-L276
   const ivec2 texSize = textureSize(tex, 0);
 
-  // Compensates the lack of perspective division for the UVs based on observed hardware behavior.
-#ifdef TEXTURE_RECT
-  const bool applyCorrection = true;
-#else
-  const bool applyCorrection = textPersp() == G_TP_PERSP;
-#endif
-
   uvCoord.y = texSize.y - uvCoord.y; // invert Y
-  uvCoord *= (applyCorrection ? 1.0 : 2.0) * tileConf.shift;
+  uvCoord *= tileConf.shift;
 
 #ifdef SIMULATE_LOW_PRECISION
   // Simulates the lower precision of the hardware's coordinate interpolation.
