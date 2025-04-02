@@ -1,13 +1,19 @@
 #define GAMMA_FACTOR 2.2
 
-vec3 gammaToLinear(in vec3 color)
-{
-  return pow(color, vec3(GAMMA_FACTOR));
+vec3 gammaToLinear(in vec3 color) {
+  return mix(
+    color * (1.0 / 12.92),
+    pow((color + 0.055) * (1.0 / 1.055), vec3(2.4)),
+    step(0.04045, color)
+  );
 }
 
-vec3 linearToGamma(in vec3 color)
-{
-  return pow(color, vec3(1.0 / GAMMA_FACTOR));
+vec3 linearToGamma(in vec3 color) {
+  return mix(
+    color * 12.92,
+    1.055 * pow(color, vec3(1.0 / 2.4)) - 0.055,
+    step(0.0031308, color)
+  );
 }
 
 #define mixSelect(amount, a, b) (mix(a, b, float(amount)))
