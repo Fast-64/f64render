@@ -265,7 +265,6 @@ void main()
   vec4 texData0 = sampleSampler(getTextureSampler(tex0Index), material.texConfs[tex0Index], inputUV, texFilter);
   vec4 texData1 = sampleSampler(getTextureSampler(tex1Index), material.texConfs[tex1Index], inputUV, texFilter);
 
-  // handle I4/I8
   texData0.rgb = linearToGamma(texData0.rgb);
   texData1.rgb = linearToGamma(texData1.rgb);
 
@@ -283,7 +282,7 @@ void main()
 
   ccValue = cc_overflowValue((cc0[0] - cc0[1]) * cc0[2] + cc0[3]);
 
-  if((OTHER_MODE_H & G_CYC_2CYCLE) != 0) {
+  if (cycleType == G_CYC_2CYCLE) {
     cc1[0].rgb = cc_fetchColor(material.cc1Color.x, ccShade, ccValue, lodFraction, texData0, texData1);
     cc1[1].rgb = cc_fetchColor(material.cc1Color.y, ccShade, ccValue, lodFraction, texData0, texData1);
     cc1[2].rgb = cc_fetchColor(material.cc1Color.z, ccShade, ccValue, lodFraction, texData0, texData1);

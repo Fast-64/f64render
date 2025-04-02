@@ -566,7 +566,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
           *render_state.ck[6:9],
           f64mat.uv_basis,
           *render_state.convert,
-          f64mat.mip_count
+          f64mat.mip_count,
         )
         
         info.render_obj.ubo_mat_data[mat_idx].update(info.render_obj.mat_data[mat_idx])                        
