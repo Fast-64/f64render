@@ -37,7 +37,6 @@ vec4 sampleSampler(in const sampler2D tex, in const TileConf tileConf, in vec2 u
 #endif
 
   uvCoord -= tileConf.low;
-  const ivec2 texelBaseInt = ivec2(floor(uvCoord));
 
   const vec2 isClamp      = step(tileConf.mask, vec2(1.0));
   const vec2 isMirror     = step(tileConf.high, vec2(0.0));
@@ -46,6 +45,8 @@ vec4 sampleSampler(in const sampler2D tex, in const TileConf tileConf, in vec2 u
   const vec2 highMinusLow = abs(tileConf.high) - abs(tileConf.low);
 
   if (texFilter != G_TF_POINT) {
+    uvCoord -= vec2(0.5);
+    const ivec2 texelBaseInt = ivec2(floor(uvCoord));
     const vec4 sample00 = wrappedMirrorSample(tex, texelBaseInt,               mask, highMinusLow, isClamp, isMirror, isForceClamp);
     const vec4 sample01 = wrappedMirrorSample(tex, texelBaseInt + ivec2(0, 1), mask, highMinusLow, isClamp, isMirror, isForceClamp);
     const vec4 sample10 = wrappedMirrorSample(tex, texelBaseInt + ivec2(1, 0), mask, highMinusLow, isClamp, isMirror, isForceClamp);
@@ -67,7 +68,7 @@ vec4 sampleSampler(in const sampler2D tex, in const TileConf tileConf, in vec2 u
 #endif
   }
   else {
-    return quantizeTexture(tileConf.flags, wrappedMirrorSample(tex, texelBaseInt, mask, highMinusLow, isClamp, isMirror, isForceClamp));
+    return quantizeTexture(tileConf.flags, wrappedMirrorSample(tex, ivec2(floor(uvCoord)), mask, highMinusLow, isClamp, isMirror, isForceClamp));
   }
 }
 
