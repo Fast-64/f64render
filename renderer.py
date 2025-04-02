@@ -380,12 +380,16 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
             continue
           if slot.material is None:
               continue
-          cached = slot.material in F64_GLOBALS.materials_cache
-          if not cached:
-            if slot.material.is_f3d:
-              F64_GLOBALS.materials_cache[slot.material] = f64_material_parse(slot.material.f3d_mat, always_set, set_light_dir)
-            else: # fallback
-              F64_GLOBALS.materials_cache[slot.material] = node_material_parse(slot.material)
+
+          if slot.material not in F64_GLOBALS.materials_cache:
+            try:
+              if slot.material.is_f3d:
+                  F64_GLOBALS.materials_cache[slot.material] = f64_material_parse(slot.material.f3d_mat, always_set, set_light_dir)
+              else: # fallback
+                F64_GLOBALS.materials_cache[slot.material] = node_material_parse(slot.material)
+            except Exception as e:
+              print(f"Error parsing material \"{slot.material.name}\": {e}")
+              F64_GLOBALS.materials_cache[slot.material] = FALLBACK_MATERIAL
 
           f64mat = F64_GLOBALS.materials_cache[slot.material]
           if f64mat.cull == "BOTH":
