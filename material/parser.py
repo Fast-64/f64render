@@ -217,9 +217,9 @@ class F64Material:
   othermode_l: int = 0
   othermode_h: int = 0
   prim_depth: tuple[float, float] = (0, 0)
-  layer: int = 0
   uv_basis: int = 0
   mip_count: int = 0
+  layer: int|str = 0
 
 def quantize_direction(direction):
   return tuple(quantize(x, 8, -1, 1) for x in direction)
@@ -232,7 +232,7 @@ def f64_parse_obj_light(f64_light: F64Light, obj: bpy.types.Object, set_light_di
 
 DEFAULT_LIGHT_DIR = quantize_direction(mathutils.Vector((0x49, 0x49, 0x49)).normalized())
 
-def f64_material_parse(f3d_mat: any, always_set: bool, set_light_dir: bool) -> F64Material:
+def f64_material_parse(f3d_mat: "F3DMaterialProperty", always_set: bool, set_light_dir: bool) -> F64Material:
   global F64_GLOBALS
   from fast64_internal.f3d.f3d_material import all_combiner_uses
   from fast64_internal.f3d.f3d_writer import lightDataToObj
@@ -300,9 +300,9 @@ def f64_material_parse(f3d_mat: any, always_set: bool, set_light_dir: bool) -> F
     othermode_h ^= gbi.G_TF_BILERP | gbi.G_TF_AVERAGE
   othermode_h |= getattr(gbi, get_textlut_mode(f3d_mat))
   f64mat.geo_mode, f64mat.othermode_l, f64mat.othermode_h = geo_mode, othermode_l, othermode_h
-  
+
   game_mode = bpy.context.scene.gameEditorMode
-  f64mat.layer = int(getattr(f3d_mat.draw_layer, game_mode.lower(), "0"), 0)
+  f64mat.layer = getattr(f3d_mat.draw_layer, game_mode.lower())
 
   return f64mat
 

@@ -65,7 +65,7 @@ def draw_sm64_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.De
   for layer, (cycle1, cycle2) in enumerate(SM64_DEFAULT_LAYERS):
     if world:
       cycle1, cycle2 = (getattr(world, f"draw_layer_{layer}_cycle_{cycle}") for cycle in range(1, 3))
-    layer_rendermodes[layer] = parse_f3d_rendermode_preset(cycle1, cycle2)
+    layer_rendermodes[str(layer)] = parse_f3d_rendermode_preset(cycle1, cycle2)
 
   render_type = f64render_rs.sm64_render_type
   ignore, collision = render_type == "IGNORE", render_type == "COLLISION"
