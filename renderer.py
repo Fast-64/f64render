@@ -243,9 +243,6 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
       # for cleaner and faster code
       shader_info.define("VIEWSPACE_LIGHTING", "0" if self.world_lighting else "1")
       shader_info.define("SIMULATE_LOW_PRECISION", "1")
-      ext_list = gpu.capabilities.extensions_get()
-      if "GL_ARB_derivative_control" in ext_list:
-        shader_info.define("DERIVATIVE_CONTROL", "1")
 
       shader_info.push_constant("MAT4", "matMVP")
       shader_info.push_constant("MAT3", "matNorm")
