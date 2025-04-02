@@ -20,6 +20,7 @@ vec4 quantize4Bit(in vec4 color) {
 vec4 quantizeTexture(uint flags, vec4 color) {
   vec4 colorQuant = flagSelect(flags, TEX_FLAG_4BIT, color, quantize4Bit(color));
   colorQuant = flagSelect(flags, TEX_FLAG_3BIT, colorQuant, quantize3Bit(colorQuant));
+  colorQuant.rgb = linearToGamma(colorQuant.rgb);
   return flagSelect(flags, TEX_FLAG_MONO, colorQuant.rgba, colorQuant.rrrr);
 }
 
@@ -264,9 +265,6 @@ void main()
 
   vec4 texData0 = sampleSampler(getTextureSampler(tex0Index), material.texConfs[tex0Index], inputUV, texFilter);
   vec4 texData1 = sampleSampler(getTextureSampler(tex1Index), material.texConfs[tex1Index], inputUV, texFilter);
-
-  texData0.rgb = linearToGamma(texData0.rgb);
-  texData1.rgb = linearToGamma(texData1.rgb);
 
   // @TODO: emulate other formats, e.g. quantization?
 
