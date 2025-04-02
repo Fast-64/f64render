@@ -145,17 +145,17 @@ vec3 cc_fetchColor(in int val, in vec4 shade, in vec4 comb, in float lodFraction
   return vec3(0.0); // default: CC_C_0
 }
 
-float cc_fetchAlpha(in int val, vec4 shade, in vec4 comb, in vec4 texData0, in vec4 texData1)
+float cc_fetchAlpha(in int val, vec4 shade, in vec4 comb, in float lodFraction, in vec4 texData0, in vec4 texData1)
 {
-       if(val == CC_A_COMB ) return comb.a;
-  else if(val == CC_A_TEX0 ) return texData0.a;
-  else if(val == CC_A_TEX1 ) return texData1.a;
-  else if(val == CC_A_PRIM ) return material.primColor.a;
-  else if(val == CC_A_SHADE) return shade.a;
-  else if(val == CC_A_ENV  ) return material.env.a;
-  // else if(val == CC_A_LOD_FRAC) return 0.0; // @TODO
-  else if(val == CC_A_PRIM_LOD_FRAC) return material.primLod.x;
-  else if(val == CC_A_1    ) return 1.0;
+       if(val == CC_A_COMB )          return comb.a;
+  else if(val == CC_A_TEX0 )          return texData0.a;
+  else if(val == CC_A_TEX1 )          return texData1.a;
+  else if(val == CC_A_PRIM )          return material.primColor.a;
+  else if(val == CC_A_SHADE)          return shade.a;
+  else if(val == CC_A_ENV  )          return material.env.a;
+  else if(val == CC_A_LOD_FRAC)       return lodFraction;
+  else if(val == CC_A_PRIM_LOD_FRAC)  return material.primLod.x;
+  else if(val == CC_A_1    )          return 1.0;
   return 0.0; // default: CC_A_0
 }
 
@@ -275,10 +275,10 @@ void main()
   cc0[2].rgb = cc_fetchColor(material.cc0Color.z, ccShade, ccValue, lodFraction, texData0, texData1);
   cc0[3].rgb = cc_fetchColor(material.cc0Color.w, ccShade, ccValue, lodFraction, texData0, texData1);
 
-  cc0[0].a = cc_fetchAlpha(material.cc0Alpha.x, ccShade, ccValue, texData0, texData1);
-  cc0[1].a = cc_fetchAlpha(material.cc0Alpha.y, ccShade, ccValue, texData0, texData1);
-  cc0[2].a = cc_fetchAlpha(material.cc0Alpha.z, ccShade, ccValue, texData0, texData1);
-  cc0[3].a = cc_fetchAlpha(material.cc0Alpha.w, ccShade, ccValue, texData0, texData1);
+  cc0[0].a = cc_fetchAlpha(material.cc0Alpha.x, ccShade, ccValue, lodFraction, texData0, texData1);
+  cc0[1].a = cc_fetchAlpha(material.cc0Alpha.y, ccShade, ccValue, lodFraction, texData0, texData1);
+  cc0[2].a = cc_fetchAlpha(material.cc0Alpha.z, ccShade, ccValue, lodFraction, texData0, texData1);
+  cc0[3].a = cc_fetchAlpha(material.cc0Alpha.w, ccShade, ccValue, lodFraction, texData0, texData1);
 
   ccValue = cc_overflowValue((cc0[0] - cc0[1]) * cc0[2] + cc0[3]);
 
@@ -288,10 +288,10 @@ void main()
     cc1[2].rgb = cc_fetchColor(material.cc1Color.z, ccShade, ccValue, lodFraction, texData0, texData1);
     cc1[3].rgb = cc_fetchColor(material.cc1Color.w, ccShade, ccValue, lodFraction, texData0, texData1);
     
-    cc1[0].a = cc_fetchAlpha(material.cc1Alpha.x, ccShade, ccValue, texData0, texData1);
-    cc1[1].a = cc_fetchAlpha(material.cc1Alpha.y, ccShade, ccValue, texData0, texData1);
-    cc1[2].a = cc_fetchAlpha(material.cc1Alpha.z, ccShade, ccValue, texData0, texData1);
-    cc1[3].a = cc_fetchAlpha(material.cc1Alpha.w, ccShade, ccValue, texData0, texData1);
+    cc1[0].a = cc_fetchAlpha(material.cc1Alpha.x, ccShade, ccValue, lodFraction, texData0, texData1);
+    cc1[1].a = cc_fetchAlpha(material.cc1Alpha.y, ccShade, ccValue, lodFraction, texData0, texData1);
+    cc1[2].a = cc_fetchAlpha(material.cc1Alpha.z, ccShade, ccValue, lodFraction, texData0, texData1);
+    cc1[3].a = cc_fetchAlpha(material.cc1Alpha.w, ccShade, ccValue, lodFraction, texData0, texData1);
 
     ccValue = (cc1[0] - cc1[1]) * cc1[2] + cc1[3];
   }
