@@ -9,7 +9,7 @@ import numpy as np
 from .tile import get_tile_conf, F64Texture
 from .cc import SOLID_CC, get_cc_settings
 from .blender import get_blender_settings
-from ..f64_globals import F64_GLOBALS
+from ..globals import F64_GLOBALS
 
 @functools.cache
 def quantize(x: float, bits: int, mi=0.0, ma=1.0): # quantize in a range
@@ -302,7 +302,7 @@ def f64_material_parse(f3d_mat: any, always_set: bool, set_light_dir: bool) -> F
   f64mat.geo_mode, f64mat.othermode_l, f64mat.othermode_h = geo_mode, othermode_l, othermode_h
   
   game_mode = bpy.context.scene.gameEditorMode
-  f64mat.layer = int(getattr(f3d_mat.draw_layer, game_mode.lower(), None), 0)
+  f64mat.layer = int(getattr(f3d_mat.draw_layer, game_mode.lower(), "0"), 0)
 
   return f64mat
 

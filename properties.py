@@ -1,7 +1,7 @@
 import bpy
 from bpy.types import PropertyGroup, Image
 
-from .f64_globals import F64_GLOBALS
+from .globals import F64_GLOBALS
 
 # TODO: Some things are from fast64 but can´t be imported at runtime
 

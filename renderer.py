@@ -1,4 +1,4 @@
-import dataclasses, copy, math, struct, pathlib, time
+import math, struct, pathlib, time
 from typing import NamedTuple
 
 import bpy
@@ -6,46 +6,28 @@ import mathutils
 import gpu
 import numpy as np
 
+
 from .utils.addon import addon_set_fast64_path
 from .mesh.gpu_batch import create_vert_buf, batch_for_shader
 from .material.parser import (
   f64_material_parse,
   f64_parse_obj_light,
   node_material_parse,
-  parse_f3d_rendermode_preset,
-  quantize,
-  quantize_direction,
-  quantize_srgb,
   F64Material,
   F64RenderState,
-  F64Rendermode,
-  F64Light,
-  quantize_tuple,
 )
 from .material.cc import SOLID_CC
-from .material.tile import get_tile_conf
 from .mesh.mesh import MeshBuffers, mesh_to_buffers
-from .f64_globals import F64_GLOBALS
-from .properties import F64RenderProperties, F64RenderSettings, TextureProperty
+from .common import ObjRenderInfo, UNIFORM_BUFFER_STRUCT, draw_f64_obj, get_scene_render_state
+from .properties import F64RenderProperties, F64RenderSettings
+from .globals import F64_GLOBALS
+
+from .sm64 import draw_sm64_scene
 
 # N64 is y-up, blender is z-up
 yup_to_zup = mathutils.Quaternion((1, 0, 0), math.radians(90.0)).to_matrix().to_4x4()
 
 MISSING_TEXTURE_COLOR = (0, 0, 0, 1)
-
-LIGHT_STRUCT = "4f 3f 4x"           # color, direction, padding
-TILE_STRUCT = "2f 2f 2f 2f i 12x"    # mask, shift, low, high, padding, flags
-
-UNIFORM_BUFFER_STRUCT = struct.Struct(
-  (TILE_STRUCT * 8) +               # texture configurations
-  (LIGHT_STRUCT * 8) +              # lights
-  "8i"                              # blender
-  "16i"                             # color-combiner settings
-  "i i i i"                         # geoMode, other-low, other-high, flags
-  "4f 4f 4f 4f"                     # prim, prim_lod, prim-depth, env, ambient
-  "3f f 3f i 3f i"                  # ck center, alpha clip, ck scale, light count, width, uv basis
-  "6f i 4x"                         # k0-k5, mipmap count, padding
-)
 
 def get_struct_ubo_size(s: struct.Struct):
   return (s.size + 15) & ~15 # force 16-byte alignment
@@ -67,84 +49,6 @@ def obj_has_f3d_materials(obj):
 def materials_set_light_direction(scene):
   return not (scene.gameEditorMode == "SM64" and scene.fast64.sm64.matstack_fix)
 
-def get_scene_render_state(scene: bpy.types.Scene):
-  fast64_rs = scene.fast64.renderSettings
-  f64render_rs: F64RenderSettings = scene.f64render.render_settings
-  state = F64RenderState(
-    lights=[F64Light(direction=(0, 0, 0)) for _x in range(0, 8)],
-    ambient_color=quantize_srgb(fast64_rs.ambientColor, force_alpha=True),
-    light_count=2,
-    prim_color=quantize_srgb(f64render_rs.default_prim_color),
-    prim_lod=(f64render_rs.default_lod_frac, f64render_rs.default_lod_min),
-    env_color=quantize_srgb(f64render_rs.default_env_color),
-    ck=tuple((*quantize_srgb(f64render_rs.default_key_center, False), *f64render_rs.default_key_scale, *f64render_rs.default_key_width)),
-    convert=quantize_tuple(f64render_rs.default_convert, 9.0, -1.0, 1.0),
-    cc=SOLID_CC,
-    alpha_clip=-1,
-    render_mode=F64Rendermode(),
-    tex_confs=([get_tile_conf(getattr(f64render_rs, f"default_tex{i}")) for i in range(0, 8)]),
-  )
-  state.lights[0] = F64Light(quantize_srgb(fast64_rs.light0Color, force_alpha=True), quantize_direction(fast64_rs.light0Direction))
-  state.lights[1] = F64Light(quantize_srgb(fast64_rs.light1Color, force_alpha=True), quantize_direction(fast64_rs.light1Direction))
-  state.set_from_rendermode(parse_f3d_rendermode_preset("G_RM_AA_ZB_OPA_SURF", "G_RM_AA_ZB_OPA_SURF2"))
-  return state
-
-class AreaRenderInfo(NamedTuple): # areas, etc
-  render_state: F64RenderState
-  name: str
-  def __hash__(self):
-    return hash(self.name)
-
-def get_sm64_area_childrens(scene: bpy.types.Scene):
-  global F64_GLOBALS
-  area_objs = []
-  def get_children_until_next_area(obj: bpy.types.Object):
-    children = []
-    for child in sorted(obj.children, key=lambda item: item.name): 
-      if child not in area_objs: 
-        children.append(child)
-        children.extend(get_children_until_next_area(child))
-    return children
-
-  if F64_GLOBALS.area_lookup is not None:
-    return F64_GLOBALS.area_lookup
-
-  area_lookup = {}
-  for obj in bpy.data.objects: # find all area type objects
-    if obj.sm64_obj_type == "Area Root": area_objs.append(obj)
-
-  render_state = get_scene_render_state(scene)
-  for area_obj in area_objs:
-    area_info = AreaRenderInfo(render_state, area_obj.name)
-    for child in get_children_until_next_area(area_obj):
-      area_lookup[child.name] = area_info
-
-  fake_area = AreaRenderInfo(render_state, "")
-  for obj in bpy.data.objects:
-    if obj.name not in area_lookup:
-      area_lookup[obj.name] = fake_area
-
-  F64_GLOBALS.area_lookup = area_lookup
-  return area_lookup
-
-# TODO if porting to fast64, reuse existing default layer dict
-SM64_DEFAULT_LAYERS = (("G_RM_ZB_OPA_SURF", "G_RM_ZB_OPA_SURF2"), 
-                      ("G_RM_AA_ZB_OPA_SURF", "G_RM_AA_ZB_OPA_SURF2"), 
-                      ("G_RM_AA_ZB_OPA_DECAL", "G_RM_AA_ZB_OPA_DECAL2"), 
-                      ("G_RM_AA_ZB_OPA_INTER", "G_RM_AA_ZB_OPA_INTER2"), 
-                      ("G_RM_AA_ZB_TEX_EDGE", "G_RM_AA_ZB_TEX_EDGE2"), 
-                      ("G_RM_AA_ZB_XLU_SURF", "G_RM_AA_ZB_XLU_SURF2"), 
-                      ("G_RM_AA_ZB_XLU_DECAL", "G_RM_AA_ZB_XLU_DECAL2"), 
-                      ("G_RM_AA_ZB_XLU_INTER", "G_RM_AA_ZB_XLU_INTER2"))
-
-@dataclasses.dataclass
-class ObjRenderInfo:
-  obj: bpy.types.Object
-  mvp_matrix: mathutils.Matrix
-  normal_matrix: mathutils.Matrix
-  render_obj: MeshBuffers
-  mats: list[tuple[int, int, F64Material]] # mat idx, indice count, material
-
 class Fast64RenderEngine(bpy.types.RenderEngine):
   bl_idname = "FAST64_RENDER_ENGINE"
   bl_label = "Fast64 Renderer"
@@ -160,6 +64,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     self.vbo_format = None
     self.draw_handler = None
     self.world_lighting = False
+    self.last_used_textures: dict[int, gpu.types.GPUTexture] = {}
 
     self.time_count = 0
     self.time_total = 0
@@ -496,121 +401,14 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     gpu.state.depth_mask_set(False)
     gpu.state.blend_set("NONE")
 
-    textures_being_used = [None] * 8 # keep track of what is in each texture sampler
-        
-    def check_frustum(info: ObjRenderInfo):
-      mvp = np.array(info.mvp_matrix)
-      bbox = (mvp @ info.render_obj.bound_box.T).T  # apply view and projection
-      bbox = bbox[:, :3] / bbox[:, 3, None]  # perspective divide
-
-      # check if any orientation (so [:, :3]) of all corners is fully outside the -1 to 1 range
-      if (np.all(bbox[:, 0] < -1) or np.all(bbox[:, 0] > 1) or
-        np.all(bbox[:, 1] < -1) or np.all(bbox[:, 1] > 1) or
-        np.all(bbox[:, 2] < -1) or np.all(bbox[:, 2] > 1)):
-        return False  # The object is completely outside the frustum
-      return True
-
-    def draw_obj(render_state: F64RenderState, info: ObjRenderInfo):
-      if not check_frustum(info):
-        if not info.obj.use_f3d_culling: # if obj is not meant to be culled in game, apply all materials
-          for mat_idx, indices_count, f64mat in info.mats: render_state.set_if_not_none(f64mat.state)
-        return
-
-      self.shader.uniform_float("matMVP", info.mvp_matrix)
-      self.shader.uniform_float("matNorm", info.normal_matrix)
-
-      for mat_idx, indices_count, f64mat in info.mats:
-        render_state.set_if_not_none(f64mat.state)
-
-        gpu.state.face_culling_set(f64mat.cull)
-        if not self.shader_info_img_impl:
-          gpu.state.blend_set(render_state.render_mode.blend)
-          gpu.state.depth_test_set(render_state.render_mode.depth_test)
-          gpu.state.depth_mask_set(render_state.render_mode.depth_write)
-
-        for i in range(8):
-          if render_state.tex_confs[i].buff is not textures_being_used[i]: 
-            self.shader.uniform_sampler(f"tex{i}", render_state.tex_confs[i].buff)
-            textures_being_used[i] = render_state.tex_confs[i].buff
-
-        light_data = []
-        for l in render_state.lights[:render_state.light_count]:
-          light_data.extend(l.color)
-          light_data.extend(l.direction)
-        light_data.extend([0.0] * ((8 - render_state.light_count) * 7))
-
-        tex_data = []
-        for t in render_state.tex_confs: tex_data.extend(t.values)
-
-        info.render_obj.mat_data[mat_idx] = UNIFORM_BUFFER_STRUCT.pack(
-          *tex_data,
-          *light_data,
-          *render_state.render_mode.blender,
-          *render_state.cc,
-          f64mat.geo_mode,
-          f64mat.othermode_l,
-          f64mat.othermode_h,
-          f64mat.flags | render_state.render_mode.flags,
-          *render_state.prim_color,
-          *render_state.prim_lod,
-          *f64mat.prim_depth,
-          *render_state.env_color,
-          *render_state.ambient_color,
-          *render_state.ck[:3],
-          render_state.alpha_clip,
-          *render_state.ck[3:6],
-          render_state.light_count,
-          *render_state.ck[6:9],
-          f64mat.uv_basis,
-          *render_state.convert,
-          f64mat.mip_count,
-        )
-        
-        info.render_obj.ubo_mat_data[mat_idx].update(info.render_obj.mat_data[mat_idx])                        
-        self.shader.uniform_block("material", info.render_obj.ubo_mat_data[mat_idx])
-
-        if self.draw_range_impl:
-          info.render_obj.batch.draw_range(self.shader, elem_start=info.render_obj.index_offsets[mat_idx] * 3, elem_count=indices_count)
-        else:
-          info.render_obj.batch[mat_idx].draw(self.shader)
-
+    self.last_used_textures.clear()
     match depsgraph.scene.gameEditorMode: # game mode implmentations
       case "SM64":
-        layer_rendermodes = {} # TODO: should this be cached globally?
-        world = depsgraph.scene.world
-        for layer, (cycle1, cycle2) in enumerate(SM64_DEFAULT_LAYERS):
-          if world:
-            cycle1, cycle2 = (getattr(world, f"draw_layer_{layer}_cycle_{cycle}") for cycle in range(1, 3))
-          layer_rendermodes[layer] = parse_f3d_rendermode_preset(cycle1, cycle2)
-
-        render_type = f64render_rs.sm64_render_type
-        ignore, collision = render_type == "IGNORE", render_type == "COLLISION"
-        area_lookup = get_sm64_area_childrens(depsgraph.scene)
-        area_queue: dict[AreaRenderInfo, dict[int, dict[str, ObjRenderInfo]]] = {}
-        for info in objs_info:
-          if (ignore and info.obj.ignore_render) or collision and info.obj.ignore_collision:
-            continue
-          name = info.obj.name
-          area = area_lookup[name]
-          layer_queue = area_queue.setdefault(area, {}) # if area has no queue, create it
-          for mat_info in info.mats:
-            mat = mat_info[2]
-            obj_queue = layer_queue.setdefault(mat.layer, {}) # if layer has no queue, create it
-            if name not in obj_queue: # if obj not already present in the layer's obj queue, create a shallow copy
-              obj_info = obj_queue[name] = copy.copy(info)
-              obj_info.mats = []
-            obj_queue[name].mats.append(mat_info)
-
-        for area, layer_queue in area_queue.items():
-          render_state = area.render_state.copy()
-          for layer, obj_queue in sorted(layer_queue.items(), key=lambda item: item[0]): # sort by layer
-            render_state.set_from_rendermode(layer_rendermodes[layer])
-            for info in dict(sorted(obj_queue.items(), key=lambda item: item[0])): # sort by obj name
-              draw_obj(render_state, obj_queue[info])
+        draw_sm64_scene(self, depsgraph, objs_info)
       case _:
         render_state = get_scene_render_state(depsgraph.scene)
         for info in objs_info:
-          draw_obj(render_state, info)
+          draw_f64_obj(self, render_state, info)
 
     draw_time = (time.process_time() - t) * 1000
     self.time_total += draw_time
