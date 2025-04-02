@@ -26,7 +26,6 @@ vec4 quantizeTexture(uint flags, vec4 color) {
 
 vec4 sampleSampler(in const sampler2D tex, in const TileConf tileConf, in vec2 uvCoord, in const uint texFilter) {
   // https://github.com/rt64/rt64/blob/61aa08f517cd16c1dbee4e097768b08e2a060307/src/shaders/TextureSampler.hlsli#L156-L276
-  // TODO: Next pixel cycle 1 bug, probably best to implement in some cpu pass for textures integrated into fast64 (same for quantization)
   const ivec2 texSize = textureSize(tex, 0);
 
   // Compensates the lack of perspective division for the UVs based on observed hardware behavior.
