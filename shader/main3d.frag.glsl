@@ -46,32 +46,29 @@ vec4 sampleSampler(in const sampler2D tex, in const TileConf tileConf, in vec2 u
 
   if (texFilter != G_TF_POINT) {
     uvCoord -= vec2(0.5);
-    ivec2 uv0 = ivec2(uvCoord);
-    const vec2 ratio = uvCoord - uv0;
-
-    int lower_flag = int(step(0.0, ratio.x - ratio.y));
-    ivec2 corner = ivec2(lower_flag, 1 - lower_flag);
-    ivec2 uv1 = uv0 + corner;
-    ivec2 uv2 = uv0 + 1;
-
-    const vec4 sample0 = wrappedMirrorSample(tex, uv0, mask, highMinusLow, isClamp, isMirror, isForceClamp);
-    const vec4 sample1 = wrappedMirrorSample(tex, uv1, mask, highMinusLow, isClamp, isMirror, isForceClamp);
-    const vec4 sample2 = wrappedMirrorSample(tex, uv2, mask, highMinusLow, isClamp, isMirror, isForceClamp);
-
-    vec2 v0 = vec2(0 - corner);
-    vec2 v1 = vec2(1 - corner);
-    vec2 v2 = ratio - vec2(corner);
-
-    const float den = (v0.x * v1.y) - (v1.x * v0.y);
-
-    float lambda1 = abs((v2.x * v1.y - v1.x * v2.y) / den);
-    float lambda2 = abs((v0.x * v2.y - v2.x * v0.y) / den);
-    float lambda0 = 1.0 - lambda1 - lambda2;
-
-    return quantizeTexture(tileConf.flags, (sample1 * lambda0) + (sample0 * lambda1) + (sample2 * lambda2));
+    const ivec2 texelBaseInt = ivec2(floor(uvCoord));
+    const vec4 sample00 = wrappedMirrorSample(tex, texelBaseInt,               mask, highMinusLow, isClamp, isMirror, isForceClamp);
+    const vec4 sample01 = wrappedMirrorSample(tex, texelBaseInt + ivec2(0, 1), mask, highMinusLow, isClamp, isMirror, isForceClamp);
+    const vec4 sample10 = wrappedMirrorSample(tex, texelBaseInt + ivec2(1, 0), mask, highMinusLow, isClamp, isMirror, isForceClamp);
+    const vec4 sample11 = wrappedMirrorSample(tex, texelBaseInt + ivec2(1, 1), mask, highMinusLow, isClamp, isMirror, isForceClamp);
+    const vec2 fracPart = uvCoord - texelBaseInt;
+#ifdef USE_LINEAR_FILTER
+    return quantizeTexture(tileConf.flags, mix(mix(sample00, sample10, fracPart.x), mix(sample01, sample11, fracPart.x), fracPart.y));
+#else
+    if (texFilter == G_TF_AVERAGE && all(lessThanEqual(vec2(1 / LOW_PRECISION), abs(fracPart - 0.5)))) {
+        return quantizeTexture(tileConf.flags, (sample00 + sample01 + sample10 + sample11) / 4.0f);
+    }
+    else {
+      // Originally written by ArthurCarvalho
+      // Sourced from https://www.emutalk.net/threads/emulating-nintendo-64-3-sample-bilinear-filtering-using-shaders.54215/
+      vec4 tri0 = mix(sample00, sample10, fracPart.x) + (sample01 - sample00) * fracPart.y;
+      vec4 tri1 = mix(sample11, sample01, 1.0 - fracPart.x) + (sample10 - sample11) * (1.0 - fracPart.y);
+      return quantizeTexture(tileConf.flags, mix(tri0, tri1, step(1.0, fracPart.x + fracPart.y)));
+    }
+#endif
   }
   else {
-    return quantizeTexture(tileConf.flags, wrappedMirrorSample(tex, ivec2(uvCoord), mask, highMinusLow, isClamp, isMirror, isForceClamp));
+    return quantizeTexture(tileConf.flags, wrappedMirrorSample(tex, ivec2(floor(uvCoord)), mask, highMinusLow, isClamp, isMirror, isForceClamp));
   }
 }
 
