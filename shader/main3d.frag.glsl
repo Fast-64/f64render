@@ -45,7 +45,7 @@ vec4 sampleSampler(in const sampler2D tex, in const TileConf tileConf, in vec2 u
   const vec2 highMinusLow = abs(tileConf.high) - abs(tileConf.low);
 
   if (texFilter != G_TF_POINT) {
-    uvCoord -= vec2(0.5);
+    uvCoord -= 0.5 * tileConf.shift;
     const ivec2 texelBaseInt = ivec2(floor(uvCoord));
     const vec4 sample00 = wrappedMirrorSample(tex, texelBaseInt,               mask, highMinusLow, isClamp, isMirror, isForceClamp);
     const vec4 sample01 = wrappedMirrorSample(tex, texelBaseInt + ivec2(0, 1), mask, highMinusLow, isClamp, isMirror, isForceClamp);

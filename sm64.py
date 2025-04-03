@@ -65,7 +65,7 @@ def draw_sm64_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.De
   for layer, (cycle1, cycle2) in enumerate(SM64_DEFAULT_LAYERS):
     if world:
       cycle1, cycle2 = (getattr(world, f"draw_layer_{layer}_cycle_{cycle}") for cycle in range(1, 3))
-    layer_rendermodes[str(layer)] = parse_f3d_rendermode_preset(cycle1, cycle2)
+    layer_rendermodes[layer] = parse_f3d_rendermode_preset(cycle1, cycle2)
 
   render_type = f64render_rs.sm64_render_type
   ignore, collision = render_type == "IGNORE", render_type == "COLLISION"
@@ -79,7 +79,7 @@ def draw_sm64_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.De
     layer_queue = area_queue.setdefault(area, {}) # if area has no queue, create it
     for mat_info in info.mats:
       mat = mat_info[2]
-      obj_queue = layer_queue.setdefault(mat.layer, {}) # if layer has no queue, create it
+      obj_queue = layer_queue.setdefault(int(mat.layer), {}) # if layer has no queue, create it
       if name not in obj_queue: # if obj not already present in the layer's obj queue, create a shallow copy
         obj_info = obj_queue[name] = copy.copy(info)
         obj_info.mats = []
