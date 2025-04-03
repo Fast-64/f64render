@@ -92,11 +92,11 @@ class TextureProperty(PropertyGroup):
 
   def draw_default_ui(self, layout: bpy.types.UILayout, index: int):
     def small_split(layout, prop: str, name: str):
-      split = layout.split(factor=0.3)
+      split = layout.split(factor=0.25)
       split.label(text=name)
       split.prop(self, prop, text="")
     def s_t(layout, name: str):
-      split = layout.split(factor=0.3)
+      split = layout.split(factor=0.25)
       split.label(text=name)
       row = split.row()
       row.prop(self.S, name.lower(), text="S")
@@ -194,6 +194,7 @@ class F64RenderSettings(bpy.types.PropertyGroup):
   default_tex6: bpy.props.PointerProperty(type=TextureProperty)
   default_tex7: bpy.props.PointerProperty(type=TextureProperty)
   always_set: bpy.props.BoolProperty(name="Ignore \"Set (Source)\"", update=update_all_materials)
+
   sm64_render_type: bpy.props.EnumProperty(
     items=[
             ("DEFAULT", "Always Draw", "Always Draw"), 
@@ -201,15 +202,17 @@ class F64RenderSettings(bpy.types.PropertyGroup):
             ("COLLISION", "Only Collision", "Collision")
     ],
   )
+  sm64_specific_area: bpy.props.PointerProperty(type=bpy.types.Object, poll=lambda self, obj: obj.type == "EMPTY" and obj.sm64_obj_type == "Area Root")
 
   def draw_props(self, layout: bpy.types.UILayout, gameEditorMode: str):
     from fast64_internal.utility import prop_split, multilineLabel
     layout = layout.column()
-    layout.prop(self, "always_set")
     if gameEditorMode == "SM64":
-      prop_split(layout, self, "sm64_render_type", "SM64 Objects")
-    layout.separator()
+      prop_split(layout, self, "sm64_render_type", "Render Type")
+      prop_split(layout, self, "sm64_specific_area", "Specific Area")
+      layout.separator()
 
+    layout.prop(self, "always_set")
     layout.prop(self, "sources_tab", icon="TRIA_DOWN" if self.sources_tab else "TRIA_RIGHT")
     if self.sources_tab:
       sources_box = layout.box().column()

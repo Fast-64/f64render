@@ -31,7 +31,7 @@ def get_sm64_area_childrens(scene: bpy.types.Scene):
 
   area_lookup = {}
   for obj in bpy.data.objects: # find all area type objects
-    if obj.sm64_obj_type == "Area Root": area_objs.append(obj)
+    if obj.type == "EMPTY" and obj.sm64_obj_type == "Area Root": area_objs.append(obj)
 
   render_state = get_scene_render_state(scene)
   for area_obj in area_objs:
@@ -67,23 +67,25 @@ def draw_sm64_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.De
       cycle1, cycle2 = (getattr(world, f"draw_layer_{layer}_cycle_{cycle}") for cycle in range(1, 3))
     layer_rendermodes[layer] = parse_f3d_rendermode_preset(cycle1, cycle2)
 
-  render_type = f64render_rs.sm64_render_type
-  ignore, collision = render_type == "IGNORE", render_type == "COLLISION"
+  ignore, collision = f64render_rs.sm64_render_type == "IGNORE", f64render_rs.sm64_render_type == "COLLISION"
+  specific_area = f64render_rs.sm64_specific_area.name if f64render_rs.sm64_specific_area else None
   area_lookup = get_sm64_area_childrens(depsgraph.scene)
   area_queue: dict[AreaRenderInfo, dict[int, dict[str, ObjRenderInfo]]] = {}
   for info in objs_info:
     if (ignore and info.obj.ignore_render) or collision and info.obj.ignore_collision:
       continue
-    name = info.obj.name
-    area = area_lookup[name]
+    obj_name = info.obj.name
+    area = area_lookup[obj_name]
+    if specific_area and area.name != specific_area: continue
+  
     layer_queue = area_queue.setdefault(area, {}) # if area has no queue, create it
     for mat_info in info.mats:
       mat = mat_info[2]
       obj_queue = layer_queue.setdefault(int(mat.layer), {}) # if layer has no queue, create it
-      if name not in obj_queue: # if obj not already present in the layer's obj queue, create a shallow copy
-        obj_info = obj_queue[name] = copy.copy(info)
+      if obj_name not in obj_queue: # if obj not already present in the layer's obj queue, create a shallow copy
+        obj_info = obj_queue[obj_name] = copy.copy(info)
         obj_info.mats = []
-      obj_queue[name].mats.append(mat_info)
+      obj_queue[obj_name].mats.append(mat_info)
 
   for area, layer_queue in area_queue.items():
     render_state = area.render_state.copy()
