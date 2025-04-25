@@ -70,8 +70,8 @@ def draw_f64_obj(render_engine: "Fast64RenderEngine", render_state: F64RenderSta
   bbox = bbox[:, :3] / bbox[:, 3, None]  # perspective divide
 
   # check if any orientation (so [:, :3]) of all corners is fully outside the -1 to 1 range
-  if (np.all(bbox[:, 0] < -1) or np.all(bbox[:, 0] > 1) or
-    np.all(bbox[:, 1] < -1) or np.all(bbox[:, 1] > 1) or
+  if (np.all(bbox[:, 0] < -1) or np.all(bbox[:, 0] > 1) and
+    np.all(bbox[:, 1] < -1) or np.all(bbox[:, 1] > 1) and
     np.all(bbox[:, 2] < -1) or np.all(bbox[:, 2] > 1)):
     if not info.obj.use_f3d_culling: # if obj is not meant to be culled in game, apply all materials
       for mat_idx, indices_count, f64mat in info.mats: render_state.set_if_not_none(f64mat.state)
