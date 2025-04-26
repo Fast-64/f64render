@@ -23,6 +23,7 @@ from .properties import F64RenderProperties, F64RenderSettings
 from .globals import F64_GLOBALS
 
 from .sm64 import draw_sm64_scene
+from .oot import draw_oot_scene
 
 # N64 is y-up, blender is z-up
 yup_to_zup = mathutils.Quaternion((1, 0, 0), math.radians(90.0)).to_matrix().to_4x4()
@@ -217,7 +218,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
         if F64_GLOBALS.current_ucode != update.id.f3d_type:
           F64_GLOBALS.materials_cache = {}
           F64_GLOBALS.current_ucode = update.id.f3d_type
-        F64_GLOBALS.area_lookup = None # reset area lookup to refresh initial render state, is this the best approach?
+        F64_GLOBALS.clear_areas() # reset area lookup to refresh initial render state, is this the best approach?
       if isinstance(update.id, bpy.types.Material) and update.id in F64_GLOBALS.materials_cache:
         F64_GLOBALS.materials_cache.pop(update.id)
       is_obj_update = isinstance(update.id, bpy.types.Object)
@@ -230,7 +231,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
           materials_set_light_direction(depsgraph.scene)
         )
       if is_obj_update and update.id.type in {"MESH", "CURVE", "SURFACE", "FONT"}:
-        F64_GLOBALS.area_lookup = None
+        F64_GLOBALS.clear_areas()
         if update.is_updated_geometry:
           cache_del_by_mesh(update.id.data.name)
 
@@ -409,6 +410,8 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     match depsgraph.scene.gameEditorMode: # game mode implmentations
       case "SM64":
         draw_sm64_scene(self, depsgraph, objs_info)
+      case "OOT":
+        draw_oot_scene(self, depsgraph, objs_info)
       case _:
         render_state = get_scene_render_state(depsgraph.scene)
         for info in objs_info:
@@ -445,10 +448,6 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     batch_2d.draw(self.shader_2d)
 
     #print("Time 2D (ms)", (time.process_time() - t) * 1000)
-
-def reset_area_lookup(_scene, _context):
-  global F64_GLOBALS
-  F64_GLOBALS.area_lookup = None
 
 class F64RenderSettingsPanel(bpy.types.Panel):
   bl_label = "f64render"

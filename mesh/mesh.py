@@ -113,7 +113,7 @@ def mesh_to_buffers(mesh: bpy.types.Mesh) -> MeshBuffers:
   # this is done to do a cheap split by material
   mat_count = len(mesh.materials)
 
-  mat_indices = np.empty(len(mesh.loop_triangles), dtype=np.int8)
+  mat_indices = np.empty(len(mesh.loop_triangles), dtype=np.uint32)
   mesh.loop_triangles.foreach_get('material_index', mat_indices) # materials, e.g.: [0, 1, 0, 1, 2, 1, ...]
   index_array = np.arange(num_corners, dtype=np.int32) # -> [0, 1, 2, 3, 4, 5, ...]
   index_array = index_array.reshape((-1, 3))           # -> [[0, 1, 2], [3, 4, 5], ...]

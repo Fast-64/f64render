@@ -195,7 +195,7 @@ class F64RenderSettings(bpy.types.PropertyGroup):
   default_tex7: bpy.props.PointerProperty(type=TextureProperty)
   always_set: bpy.props.BoolProperty(name="Ignore \"Set (Source)\"", update=update_all_materials)
 
-  sm64_render_type: bpy.props.EnumProperty(
+  render_type: bpy.props.EnumProperty(
     items=[
             ("DEFAULT", "Always Draw", "Always Draw"), 
             ("IGNORE", "Respect \"Ignore Render\"", "Respect \"Ignore Render\""), 
@@ -203,13 +203,15 @@ class F64RenderSettings(bpy.types.PropertyGroup):
     ],
   )
   sm64_specific_area: bpy.props.PointerProperty(type=bpy.types.Object, poll=lambda self, obj: obj.type == "EMPTY" and obj.sm64_obj_type == "Area Root")
+  oot_specific_room: bpy.props.PointerProperty(type=bpy.types.Object, poll=lambda self, obj: obj.type == "EMPTY" and obj.ootEmptyType == "Room")
 
   def draw_props(self, layout: bpy.types.UILayout, gameEditorMode: str):
     from fast64_internal.utility import prop_split, multilineLabel
     layout = layout.column()
-    if gameEditorMode == "SM64":
-      prop_split(layout, self, "sm64_render_type", "Render Type")
-      prop_split(layout, self, "sm64_specific_area", "Specific Area")
+    if gameEditorMode in {"SM64", "OOT"}:
+      prop_split(layout, self, "render_type", "Render Type")
+      if gameEditorMode == "SM64": prop_split(layout, self, "sm64_specific_area", "Specific Area")
+      if gameEditorMode == "OOT": prop_split(layout, self, "oot_specific_room", "Specific Room")
       layout.separator()
 
     layout.prop(self, "always_set")

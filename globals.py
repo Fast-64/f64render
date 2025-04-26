@@ -7,7 +7,12 @@ class F64Globals:
     self.materials_cache: dict[bpy.types.Material, "F64Material"] = {}
     self.meshCache: dict["MeshBuffers"] = {}
     self.obj_lights: dict[str, "F64Light"] = {}
-    self.area_lookup: dict|None = None
+    self.sm64_area_lookup: dict|None = None
+    self.oot_room_lookup: dict|None = None # oot
     self.current_ucode = None
+
+  def clear_areas(self):
+    self.sm64_area_lookup = None
+    self.oot_room_lookup = None
 
 F64_GLOBALS = F64Globals()

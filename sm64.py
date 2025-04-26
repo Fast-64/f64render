@@ -17,35 +17,47 @@ class AreaRenderInfo(NamedTuple): # areas, etc
 
 def get_sm64_area_childrens(scene: bpy.types.Scene):
   global F64_GLOBALS
-  area_objs = []
-  def get_children_until_next_area(obj: bpy.types.Object):
-    children = []
+  
+  if F64_GLOBALS.sm64_area_lookup is not None:
+    return F64_GLOBALS.sm64_area_lookup
+
+  sm64_area_lookup = {}
+  render_state = get_scene_render_state(scene)
+  level_objs: list[bpy.types.Object] = []
+  area_objs: list[bpy.types.Object] = []
+
+  def get_area_children(obj: bpy.types.Object, name: str = ""):
     for child in sorted(obj.children, key=lambda item: item.name): 
-      if child not in area_objs: 
-        children.append(child)
-        children.extend(get_children_until_next_area(child))
-    return children
+      if child not in area_objs:
+        sm64_area_lookup[child.name] = AreaRenderInfo(render_state, name)
+        get_area_children(child, name)
+      else:
+        get_area_children(child, child.name)
 
-  if F64_GLOBALS.area_lookup is not None:
-    return F64_GLOBALS.area_lookup
+  def get_level_children(obj: bpy.types.Object, name: str):
+    for child in sorted(obj.children, key=lambda item: item.name): 
+      if child in area_objs:
+        get_area_children(child, child.name)
+      else:
+        sm64_area_lookup[child.name] = AreaRenderInfo(render_state, name)
+        get_level_children(child, name)
 
-  area_lookup = {}
   for obj in bpy.data.objects: # find all area type objects
     if obj.type == "EMPTY" and obj.sm64_obj_type == "Area Root": area_objs.append(obj)
+    if obj.type == "EMPTY":
+      if obj.sm64_obj_type == "Level Root": level_objs.append(obj)
+      if obj.sm64_obj_type == "Area Root": area_objs.append(obj)
 
-  render_state = get_scene_render_state(scene)
-  for area_obj in area_objs:
-    area_info = AreaRenderInfo(render_state, area_obj.name)
-    for child in get_children_until_next_area(area_obj):
-      area_lookup[child.name] = area_info
+  for level_obj in level_objs:
+    get_level_children(level_obj, level_obj.name)
 
   fake_area = AreaRenderInfo(render_state, "")
   for obj in bpy.data.objects:
-    if obj.name not in area_lookup:
-      area_lookup[obj.name] = fake_area
+    if obj.name not in sm64_area_lookup:
+      sm64_area_lookup[obj.name] = fake_area
 
-  F64_GLOBALS.area_lookup = area_lookup
-  return area_lookup
+  F64_GLOBALS.sm64_area_lookup = sm64_area_lookup
+  return sm64_area_lookup
 
 # TODO if porting to fast64, reuse existing default layer dict
 SM64_DEFAULT_LAYERS = (("G_RM_ZB_OPA_SURF", "G_RM_ZB_OPA_SURF2"), 
@@ -67,7 +79,7 @@ def draw_sm64_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.De
       cycle1, cycle2 = (getattr(world, f"draw_layer_{layer}_cycle_{cycle}") for cycle in range(1, 3))
     layer_rendermodes[layer] = parse_f3d_rendermode_preset(cycle1, cycle2)
 
-  ignore, collision = f64render_rs.sm64_render_type == "IGNORE", f64render_rs.sm64_render_type == "COLLISION"
+  ignore, collision = f64render_rs.render_type == "IGNORE", f64render_rs.render_type == "COLLISION"
   specific_area = f64render_rs.sm64_specific_area.name if f64render_rs.sm64_specific_area else None
   area_lookup = get_sm64_area_childrens(depsgraph.scene)
   area_queue: dict[AreaRenderInfo, dict[int, dict[str, ObjRenderInfo]]] = {}
