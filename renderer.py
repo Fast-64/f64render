@@ -47,8 +47,8 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     self.shader_fallback = None
     self.vbo_format = None
     self.draw_handler = None
-    self.world_lighting = False
-  
+    self.use_atomic_rendering = True
+
     self.last_used_textures: dict[int, gpu.types.GPUTexture] = {}
 
     self.time_count = 0
@@ -70,8 +70,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     self.shader_interlock_support = 'GL_ARB_fragment_shader_interlock' in ext_list
     if not self.shader_interlock_support:
       print("\n\nWarning: GL_ARB_fragment_shader_interlock not supported!\n\n")
-    self.shader_info_img_impl = bpy.app.version >= (4, 1, 0)
-    if not self.shader_info_img_impl:
+    if bpy.app.version < (4, 1, 0):
       print("\n\nWarning: Blender version too old! Expect limited blending emulation!\n\n")
     self.draw_range_impl = bpy.app.version >= (3, 6, 0)
 
@@ -88,78 +87,77 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
       self.depth_texture = gpu.types.GPUTexture((size_x, size_y), format='R32I')
       self.color_texture = gpu.types.GPUTexture((size_x, size_y), format='R32UI')
 
-  def init_shader(self):
-    if not self.shader:
-      print("Compiling shader")
+  def init_shader(self, scene: bpy.types.Scene):
+    print("Compiling shader")
 
-      shaderPath = (pathlib.Path(__file__).parent / "shader").resolve()
-      shaderVert = ""
-      shaderFrag = ""
+    shaderPath = (pathlib.Path(__file__).parent / "shader").resolve()
+    shaderVert = ""
+    shaderFrag = ""
 
-      with open(shaderPath / "utils.glsl", "r", encoding="utf-8") as f:
-        shaderUtils = f.read()
-        shaderVert += shaderUtils
-        shaderFrag += shaderUtils
+    with open(shaderPath / "utils.glsl", "r", encoding="utf-8") as f:
+      shaderUtils = f.read()
+      shaderVert += shaderUtils
+      shaderFrag += shaderUtils
 
-      with open(shaderPath / "defines.glsl", "r", encoding="utf-8") as f:
-        shaderDef = f.read()
-        shaderVert += shaderDef
-        shaderFrag += shaderDef
+    with open(shaderPath / "defines.glsl", "r", encoding="utf-8") as f:
+      shaderDef = f.read()
+      shaderVert += shaderDef
+      shaderFrag += shaderDef
 
-      with open(shaderPath / "main3d.vert.glsl", "r", encoding="utf-8") as f:
-        shaderVert += f.read()
+    with open(shaderPath / "main3d.vert.glsl", "r", encoding="utf-8") as f:
+      shaderVert += f.read()
 
-      with open(shaderPath / "main3d.frag.glsl", "r", encoding="utf-8") as f:
-        shaderFrag += f.read()
+    with open(shaderPath / "main3d.frag.glsl", "r", encoding="utf-8") as f:
+      shaderFrag += f.read()
 
-      shader_info = gpu.types.GPUShaderCreateInfo()
-      
-      with open(shaderPath / "structs.glsl", "r", encoding="utf-8") as f:
-        shader_info.typedef_source(f.read())
-      
-      # vertex -> fragment
-      vert_out = gpu.types.GPUStageInterfaceInfo("vert_interface")
-      vert_out.no_perspective("VEC4", "cc_shade")
-      vert_out.flat("VEC4", "cc_shade_flat")
-      vert_out.smooth("VEC2", "inputUV")
-      vert_out.no_perspective("VEC2", "posScreen")
+    shader_info = gpu.types.GPUShaderCreateInfo()
+    
+    with open(shaderPath / "structs.glsl", "r", encoding="utf-8") as f:
+      shader_info.typedef_source(f.read())
+    
+    # vertex -> fragment
+    vert_out = gpu.types.GPUStageInterfaceInfo("vert_interface")
+    vert_out.no_perspective("VEC4", "cc_shade")
+    vert_out.flat("VEC4", "cc_shade_flat")
+    vert_out.smooth("VEC2", "inputUV")
+    vert_out.no_perspective("VEC2", "posScreen")
 
-      if self.shader_info_img_impl:
-        shader_info.define("depth_unchanged", "depth_any")
-        if self.shader_interlock_support:
-          shader_info.define("USE_SHADER_INTERLOCK", "1")
-        shader_info.define("BLEND_EMULATION", "1")
-      # Using the already calculated view space normals instead of transforming the light direction makes
-      # for cleaner and faster code
-      shader_info.define("VIEWSPACE_LIGHTING", "0" if self.world_lighting else "1")
-      shader_info.define("SIMULATE_LOW_PRECISION", "1")
+    if self.use_atomic_rendering:
+      shader_info.define("depth_unchanged", "depth_any")
+      if self.shader_interlock_support:
+        shader_info.define("USE_SHADER_INTERLOCK", "1")
+      shader_info.define("BLEND_EMULATION", "1")
+    # Using the already calculated view space normals instead of transforming the light direction makes
+    # for cleaner and faster code
+    shader_info.define("VIEWSPACE_LIGHTING", "0" if scene.fast64.renderSettings.useWorldSpaceLighting else "1")
+    shader_info.define("SIMULATE_LOW_PRECISION", "1")
 
-      shader_info.push_constant("MAT4", "matMVP")
-      shader_info.push_constant("MAT3", "matNorm")
+    shader_info.push_constant("MAT4", "matMVP")
+    shader_info.push_constant("MAT3", "matNorm")
 
-      shader_info.uniform_buf(0, "UBO_Material", "material")
+    shader_info.uniform_buf(0, "UBO_Material", "material")
 
-      shader_info.vertex_in(0, "VEC3", "pos") # keep blenders name keep for better compat.
-      shader_info.vertex_in(1, "VEC3", "inNormal")
-      shader_info.vertex_in(2, "VEC4", "inColor")
-      shader_info.vertex_in(3, "VEC2", "inUV")
-      shader_info.vertex_out(vert_out)
-      
-      for i in range(8):
-        shader_info.sampler(i, "FLOAT_2D", f"tex{i}")
-      
-      if self.shader_info_img_impl:
-        shader_info.image(2, 'R32UI', "UINT_2D_ATOMIC", "color_texture", qualifiers={"READ", "WRITE"})
-        shader_info.image(3, 'R32I',  "INT_2D_ATOMIC",  "depth_texture", qualifiers={"READ", "WRITE"})
-      else:
-        shader_info.fragment_out(0, "VEC4", "FragColor")
+    shader_info.vertex_in(0, "VEC3", "pos") # keep blenders name keep for better compat.
+    shader_info.vertex_in(1, "VEC3", "inNormal")
+    shader_info.vertex_in(2, "VEC4", "inColor")
+    shader_info.vertex_in(3, "VEC2", "inUV")
+    shader_info.vertex_out(vert_out)
+    
+    for i in range(8):
+      shader_info.sampler(i, "FLOAT_2D", f"tex{i}")
+    
+    if self.use_atomic_rendering:
+      shader_info.image(2, 'R32UI', "UINT_2D_ATOMIC", "color_texture", qualifiers={"READ", "WRITE"})
+      shader_info.image(3, 'R32I',  "INT_2D_ATOMIC",  "depth_texture", qualifiers={"READ", "WRITE"})
+    else:
+      shader_info.fragment_out(0, "VEC4", "FragColor")
 
-      shader_info.vertex_source(shaderVert)
-      shader_info.fragment_source(shaderFrag)
-      
-      self.shader = gpu.shader.create_from_info(shader_info)      
-      self.shader_fallback = gpu.shader.from_builtin('3D_UNIFORM_COLOR' if bpy.app.version < (4, 1, 0) else 'UNIFORM_COLOR')
-      self.vbo_format = self.shader.format_calc()
+    shader_info.vertex_source(shaderVert)
+    shader_info.fragment_source(shaderFrag)
+    
+    self.shader = gpu.shader.create_from_info(shader_info)      
+    self.shader_fallback = gpu.shader.from_builtin('3D_UNIFORM_COLOR' if bpy.app.version < (4, 1, 0) else 'UNIFORM_COLOR')
+    self.vbo_format = self.shader.format_calc()
 
   def init_shader_2d(self):
     if not self.shader_2d:
@@ -202,6 +200,11 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
         if F64_GLOBALS.current_ucode != update.id.f3d_type:
           F64_GLOBALS.materials_cache = {}
           F64_GLOBALS.current_ucode = update.id.f3d_type
+        world_lighting = update.id.fast64.renderSettings.useWorldSpaceLighting
+        if world_lighting != F64_GLOBALS.world_lighting:
+          F64_GLOBALS.world_lighting = world_lighting
+          F64_GLOBALS.rebuid_shaders = True
+
         F64_GLOBALS.clear_areas() # reset area lookup to refresh initial render state, is this the best approach?
       if isinstance(update.id, bpy.types.Material) and update.id in F64_GLOBALS.materials_cache:
         F64_GLOBALS.materials_cache.pop(update.id)
@@ -256,40 +259,36 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     t = time.process_time()
 
     space_view_3d = context.space_data
-    if self.shader_info_img_impl:
+    f64render_rs: F64RenderSettings = depsgraph.scene.f64render.render_settings
+    always_set = f64render_rs.always_set
+    projection_matrix, view_matrix = context.region_data.perspective_matrix, context.region_data.view_matrix
+    self.use_atomic_rendering = bpy.app.version >= (4, 1, 0) and f64render_rs.use_atomic_rendering
+
+    if F64_GLOBALS.rebuid_shaders or self.shader is None:
+      F64_GLOBALS.rebuid_shaders = False
+      self.init_shader(context.scene)
+  
+    if self.use_atomic_rendering:
       self.update_render_size(context.region.width, context.region.height)
       self.color_texture.clear(format='UINT', value=[0x080808])
       self.depth_texture.clear(format='INT', value=[0])
 
-    world_lighting = depsgraph.scene.fast64.renderSettings.useWorldSpaceLighting
-    if world_lighting != self.world_lighting:
-      self.world_lighting = world_lighting
-      self.shader = None
-    
-    self.init_shader()
     self.shader.bind()
 
     # Enable depth test
     gpu.state.depth_test_set('LESS')
     gpu.state.depth_mask_set(True)
 
-    # global params
-    f64render_rs: F64RenderSettings = depsgraph.scene.f64render.render_settings
-    always_set = f64render_rs.always_set
-    projection_matrix, view_matrix = context.region_data.perspective_matrix, context.region_data.view_matrix
-
-    # Note: space conversion to Y-up happens indirectly during the normal matrix calculation
-  
-    # get visible objects, this cannot be done in despgraph objects for whatever reason
-    hidden_objs = {ob.name for ob in bpy.context.view_layer.objects if not ob.visible_get() and ob.data is not None}
-
-    if self.shader_info_img_impl:
+    if self.use_atomic_rendering:
       self.shader.image('depth_texture', self.depth_texture)
       self.shader.image('color_texture', self.color_texture)
 
     gpu.state.depth_test_set('NONE')
     gpu.state.depth_mask_set(False)
     gpu.state.blend_set("NONE")
+
+    # get visible objects, this cannot be done in despgraph objects for whatever reason
+    hidden_objs = {ob.name for ob in bpy.context.view_layer.objects if not ob.visible_get() and ob.data is not None}
 
     self.last_used_textures.clear()
     match depsgraph.scene.gameEditorMode: # game mode implmentations
@@ -314,7 +313,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
       self.time_total = 0
       self.time_count = 0
 
-    if not self.shader_info_img_impl:
+    if not self.use_atomic_rendering:
       return # when there's no access to color and depth aux images, we render directly, so skip final 2d draw
 
     #t = time.process_time()

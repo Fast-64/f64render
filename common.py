@@ -100,7 +100,7 @@ def draw_f64_obj(render_engine: "Fast64RenderEngine", render_state: F64RenderSta
     render_state.set_if_not_none(f64mat.state)
 
     gpu.state.face_culling_set(f64mat.cull)
-    if not render_engine.shader_info_img_impl:
+    if not render_engine.use_atomic_rendering:
       gpu.state.blend_set(render_state.render_mode.blend)
       gpu.state.depth_test_set(render_state.render_mode.depth_test)
       gpu.state.depth_mask_set(render_state.render_mode.depth_write)

@@ -123,7 +123,18 @@ def update_all_materials(_scene, _context):
   global F64_GLOBALS
   F64_GLOBALS.materials_cache = {}
 
+def rebuild_shaders(_scene, _context):
+  global F64_GLOBALS
+  F64_GLOBALS.rebuid_shaders = True
+
 class F64RenderSettings(bpy.types.PropertyGroup):
+  use_atomic_rendering: bpy.props.BoolProperty(
+    name="Use Atomic Rendering",
+    default=False,
+    description="Atomic rendering will draw to a depth and color buffer seperately, which allows for proper blender and decal emulation.\n"
+    "This may cause artifacts if your GPU does not support the interlock extension.",
+    update=rebuild_shaders
+  )
   sources_tab: bpy.props.BoolProperty(name="Default Sources")
   default_prim_color: bpy.props.FloatVectorProperty(
     description="Primitive Color",
@@ -214,6 +225,8 @@ class F64RenderSettings(bpy.types.PropertyGroup):
       if gameEditorMode == "OOT": prop_split(layout, self, "oot_specific_room", "Specific Room")
       layout.separator()
 
+    if bpy.app.version >= (4, 1, 0):
+      layout.prop(self, "use_atomic_rendering")
     layout.prop(self, "always_set")
     layout.prop(self, "sources_tab", icon="TRIA_DOWN" if self.sources_tab else "TRIA_RIGHT")
     if self.sources_tab:
