@@ -81,15 +81,13 @@ def draw_oot_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.Dep
   room_queue: dict[RoomRenderInfo, dict[int, dict[str, ObjRenderInfo]]] = {}
 
   for obj in depsgraph.objects:
-    if (ignore and obj.ignore_render) or (collision and obj.ignore_collision):
+    obj_name = obj.name
+    room = room_lookup[obj_name]
+    if (ignore and obj.ignore_render) or (collision and obj.ignore_collision) or (specific_room and room.name != specific_room):
       continue
     obj_info = collect_obj_info(render_engine, obj, depsgraph, hidden_objs, space_view_3d, projection_matrix, view_matrix, always_set)
     if obj_info is None:
       continue
-
-    obj_name = obj_info.obj.name
-    room = room_lookup[obj_name]
-    if specific_room and room.name != specific_room: continue
   
     layer_queue = room_queue.setdefault(room, {}) # if room has no queue, create it
     for mat_info in obj_info.mats:

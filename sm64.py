@@ -85,15 +85,13 @@ def draw_sm64_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.De
   area_queue: dict[AreaRenderInfo, dict[int, dict[str, ObjRenderInfo]]] = {}
 
   for obj in depsgraph.objects:
-    if (ignore and obj.ignore_render) or (collision and obj.ignore_collision):
+    obj_name = obj.name
+    area = area_lookup[obj_name]
+    if (ignore and obj.ignore_render) or (collision and obj.ignore_collision) or (specific_area and area.name != specific_area):
       continue
     obj_info = collect_obj_info(render_engine, obj, depsgraph, hidden_objs, space_view_3d, projection_matrix, view_matrix, always_set)
     if obj_info is None:
       continue
-
-    obj_name = obj_info.obj.name
-    area = area_lookup[obj_name]
-    if specific_area and area.name != specific_area: continue
   
     layer_queue = area_queue.setdefault(area, {}) # if area has no queue, create it
     for mat_info in obj_info.mats:
