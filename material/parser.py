@@ -219,7 +219,7 @@ class F64Material:
   prim_depth: tuple[float, float] = (0, 0)
   uv_basis: int = 0
   mip_count: int = 0
-  layer: int|str = 0
+  layer: int|str|None = 0
 
 def quantize_direction(direction):
   return tuple(quantize(x, 8, -1, 1) for x in direction)
@@ -302,7 +302,7 @@ def f64_material_parse(f3d_mat: "F3DMaterialProperty", always_set: bool, set_lig
   f64mat.geo_mode, f64mat.othermode_l, f64mat.othermode_h = geo_mode, othermode_l, othermode_h
 
   game_mode = bpy.context.scene.gameEditorMode
-  f64mat.layer = getattr(f3d_mat.draw_layer, game_mode.lower())
+  f64mat.layer = getattr(f3d_mat.draw_layer, game_mode.lower(), None)
 
   return f64mat
 
