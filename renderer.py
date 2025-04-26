@@ -1,24 +1,12 @@
 import math, struct, pathlib, time
-from typing import NamedTuple
 
 import bpy
 import mathutils
 import gpu
-import numpy as np
-
 
 from .utils.addon import addon_set_fast64_path
-from .mesh.gpu_batch import create_vert_buf, batch_for_shader
-from .material.parser import (
-  f64_material_parse,
-  f64_parse_obj_light,
-  node_material_parse,
-  F64Material,
-  F64RenderState,
-)
-from .material.cc import SOLID_CC
-from .mesh.mesh import MeshBuffers, mesh_to_buffers
-from .common import ObjRenderInfo, UNIFORM_BUFFER_STRUCT, draw_f64_obj, get_scene_render_state
+from .material.parser import f64_parse_obj_light
+from .common import ObjRenderInfo, draw_f64_obj, get_scene_render_state, collect_obj_info
 from .properties import F64RenderProperties, F64RenderSettings
 from .globals import F64_GLOBALS
 
@@ -29,11 +17,6 @@ from .oot import draw_oot_scene
 yup_to_zup = mathutils.Quaternion((1, 0, 0), math.radians(90.0)).to_matrix().to_4x4()
 
 MISSING_TEXTURE_COLOR = (0, 0, 0, 1)
-
-def get_struct_ubo_size(s: struct.Struct):
-  return (s.size + 15) & ~15 # force 16-byte alignment
-
-FALLBACK_MATERIAL = F64Material(state=F64RenderState(cc=SOLID_CC))
 
 def cache_del_by_mesh(mesh_name):
   global F64_GLOBALS
@@ -65,6 +48,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     self.vbo_format = None
     self.draw_handler = None
     self.world_lighting = False
+  
     self.last_used_textures: dict[int, gpu.types.GPUTexture] = {}
 
     self.time_count = 0
@@ -271,8 +255,6 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
 
     t = time.process_time()
 
-    ubo_size = get_struct_ubo_size(UNIFORM_BUFFER_STRUCT)
-
     space_view_3d = context.space_data
     if self.shader_info_img_impl:
       self.update_render_size(context.region.width, context.region.height)
@@ -293,110 +275,13 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
 
     # global params
     f64render_rs: F64RenderSettings = depsgraph.scene.f64render.render_settings
-    set_light_dir = materials_set_light_direction(depsgraph.scene)
     always_set = f64render_rs.always_set
     projection_matrix, view_matrix = context.region_data.perspective_matrix, context.region_data.view_matrix
 
     # Note: space conversion to Y-up happens indirectly during the normal matrix calculation
   
     # get visible objects, this cannot be done in despgraph objects for whatever reason
-    hidden_obj = [ob.name for ob in bpy.context.view_layer.objects if not ob.visible_get() and ob.data is not None]
-
-    objs_info: list[ObjRenderInfo] = []
-    for obj in depsgraph.objects:
-      if obj.type in {"MESH", "CURVE", "SURFACE", "FONT"} and obj.data is not None:
-        meshID = obj.name + "#" + obj.data.name
-
-        # check for objects that transitioned from non-f3d to f3d materials
-        if meshID in F64_GLOBALS.meshCache:
-          renderObj = F64_GLOBALS.meshCache[meshID]
-
-        # Mesh not cached: parse & convert mesh data, then prepare a GPU batch
-        if meshID not in F64_GLOBALS.meshCache:
-          # print("    -> Update object", meshID)
-          if obj.mode == 'EDIT':
-            mesh = obj.evaluated_get(depsgraph).to_mesh()
-          else:
-            mesh = obj.evaluated_get(depsgraph).to_mesh(preserve_all_data_layers=True, depsgraph=depsgraph)
-
-          renderObj = F64_GLOBALS.meshCache[meshID] = mesh_to_buffers(mesh)
-          renderObj.mesh_name = obj.data.name
-          renderObj.bound_box = np.array([[*corner, 1] for corner in obj.bound_box])
-
-          mat_count = max(len(obj.material_slots), 1)
-          vert_buf = create_vert_buf(self.vbo_format,
-            renderObj.vert,
-            renderObj.norm,
-            renderObj.color,
-            renderObj.uv,
-          )
-          if self.draw_range_impl:
-            renderObj.batch = batch_for_shader(vert_buf, renderObj.indices)
-          else: # we need to create batches for each material
-            renderObj.batch = []
-            if not obj.material_slots: # if no material slot, we only have one batch for the whole geo
-              renderObj.batch = [batch_for_shader(vert_buf, renderObj.indices)]
-            else:
-              renderObj.batch = []      
-            for i, slot in enumerate(obj.material_slots):
-              indices = renderObj.indices[renderObj.index_offsets[i]:renderObj.index_offsets[i+1]]
-              if len(indices) == 0: # ignore unused materials
-                renderObj.batch.append(None)
-              else:
-                renderObj.batch.append(batch_for_shader(vert_buf, indices))
-
-          renderObj.mat_data = [bytes(ubo_size)] * mat_count
-          renderObj.ubo_mat_data = [None] * mat_count
-
-          for i in range(mat_count):
-            renderObj.ubo_mat_data[i] = gpu.types.GPUUniformBuf(renderObj.mat_data[i])
-
-          obj.to_mesh_clear()
-
-        if obj.data is None: continue
-        # Handle "Local View" (pressing '/')
-        if space_view_3d.local_view and not obj.local_view_get(space_view_3d): continue
-        if obj.name in hidden_obj: continue
-        # print("Draw object", obj.data.session_uid, visible_obj_ids)
-  
-        # print("space_view_3d.local_view", space_view_3d.clip_start, space_view_3d.clip_end)
-
-        meshID = obj.name + "#" + obj.data.name
-        if meshID not in F64_GLOBALS.meshCache: continue
-        # print("  -> Draw object", meshID)
-        render_obj: MeshBuffers = F64_GLOBALS.meshCache[meshID]
-
-        modelview_matrix = obj.matrix_world
-        mvp_matrix = projection_matrix @ modelview_matrix
-        normal_matrix = (view_matrix @ obj.matrix_world).to_3x3().inverted().transposed()
-
-        info = ObjRenderInfo(obj, mvp_matrix, normal_matrix, render_obj, [])
-        objs_info.append(info)
-
-        if len(obj.material_slots) == 0: # fallback if no material, f3d or otherwise
-          info.mats.append((0, len(render_obj.indices) * 3, FALLBACK_MATERIAL))
-        for i, slot in enumerate(obj.material_slots):
-          indices_count = (render_obj.index_offsets[i+1] - render_obj.index_offsets[i]) * 3
-          if indices_count == 0: # ignore unused materials
-            continue
-          if slot.material is None:
-              continue
-
-          if slot.material not in F64_GLOBALS.materials_cache:
-            try:
-              if slot.material.is_f3d:
-                  F64_GLOBALS.materials_cache[slot.material] = f64_material_parse(slot.material.f3d_mat, always_set, set_light_dir)
-              else: # fallback
-                F64_GLOBALS.materials_cache[slot.material] = node_material_parse(slot.material)
-            except Exception as e:
-              print(f"Error parsing material \"{slot.material.name}\": {e}")
-              F64_GLOBALS.materials_cache[slot.material] = FALLBACK_MATERIAL
-
-          f64mat = F64_GLOBALS.materials_cache[slot.material]
-          if f64mat.cull == "BOTH":
-            continue
-
-          info.mats.append((i, indices_count, f64mat))
+    hidden_objs = {ob.name for ob in bpy.context.view_layer.objects if not ob.visible_get() and ob.data is not None}
 
     if self.shader_info_img_impl:
       self.shader.image('depth_texture', self.depth_texture)
@@ -409,13 +294,15 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     self.last_used_textures.clear()
     match depsgraph.scene.gameEditorMode: # game mode implmentations
       case "SM64":
-        draw_sm64_scene(self, depsgraph, objs_info)
+        draw_sm64_scene(self, depsgraph, hidden_objs, space_view_3d, projection_matrix, view_matrix, always_set)
       case "OOT":
-        draw_oot_scene(self, depsgraph, objs_info)
+        draw_oot_scene(self, depsgraph, hidden_objs, space_view_3d, projection_matrix, view_matrix, always_set)
       case _:
         render_state = get_scene_render_state(depsgraph.scene)
-        for info in objs_info:
-          draw_f64_obj(self, render_state, info)
+        for obj in depsgraph.objects:
+          obj_info = collect_obj_info(self, obj, depsgraph, hidden_objs, space_view_3d, projection_matrix, view_matrix, always_set)
+          if obj_info is not None:
+            draw_f64_obj(self, render_state, obj_info)
 
     draw_time = (time.process_time() - t) * 1000
     self.time_total += draw_time

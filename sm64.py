@@ -2,10 +2,10 @@ import copy
 from typing import NamedTuple
 
 import bpy
-import numpy as np
+import mathutils
 
 from .material.parser import parse_f3d_rendermode_preset, F64RenderState
-from .common import ObjRenderInfo, draw_f64_obj, get_scene_render_state
+from .common import ObjRenderInfo, draw_f64_obj, collect_obj_info, get_scene_render_state
 from .properties import F64RenderSettings
 from .globals import F64_GLOBALS
 
@@ -60,7 +60,7 @@ def get_sm64_area_childrens(scene: bpy.types.Scene):
   return sm64_area_lookup
 
 # TODO if porting to fast64, reuse existing default layer dict
-SM64_DEFAULT_LAYERS = (("G_RM_ZB_OPA_SURF", "G_RM_ZB_OPA_SURF2"), 
+DEFAULT_LAYERS = (("G_RM_ZB_OPA_SURF", "G_RM_ZB_OPA_SURF2"), 
                       ("G_RM_AA_ZB_OPA_SURF", "G_RM_AA_ZB_OPA_SURF2"), 
                       ("G_RM_AA_ZB_OPA_DECAL", "G_RM_AA_ZB_OPA_DECAL2"), 
                       ("G_RM_AA_ZB_OPA_INTER", "G_RM_AA_ZB_OPA_INTER2"), 
@@ -69,12 +69,12 @@ SM64_DEFAULT_LAYERS = (("G_RM_ZB_OPA_SURF", "G_RM_ZB_OPA_SURF2"),
                       ("G_RM_AA_ZB_XLU_DECAL", "G_RM_AA_ZB_XLU_DECAL2"), 
                       ("G_RM_AA_ZB_XLU_INTER", "G_RM_AA_ZB_XLU_INTER2"))
 
-def draw_sm64_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.Depsgraph, objs_info: list[ObjRenderInfo]):
+def draw_sm64_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.Depsgraph, hidden_objs: set[bpy.types.Object], space_view_3d: bpy.types.SpaceView3D, projection_matrix: mathutils.Matrix, view_matrix: mathutils.Matrix, always_set: bool):
   f64render_rs: F64RenderSettings = depsgraph.scene.f64render.render_settings
 
   layer_rendermodes = {} # TODO: should this be cached globally?
   world = depsgraph.scene.world
-  for layer, (cycle1, cycle2) in enumerate(SM64_DEFAULT_LAYERS):
+  for layer, (cycle1, cycle2) in enumerate(DEFAULT_LAYERS):
     if world:
       cycle1, cycle2 = (getattr(world, f"draw_layer_{layer}_cycle_{cycle}") for cycle in range(1, 3))
     layer_rendermodes[layer] = parse_f3d_rendermode_preset(cycle1, cycle2)
@@ -83,19 +83,24 @@ def draw_sm64_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.De
   specific_area = f64render_rs.sm64_specific_area.name if f64render_rs.sm64_specific_area else None
   area_lookup = get_sm64_area_childrens(depsgraph.scene)
   area_queue: dict[AreaRenderInfo, dict[int, dict[str, ObjRenderInfo]]] = {}
-  for info in objs_info:
-    if (ignore and info.obj.ignore_render) or collision and info.obj.ignore_collision:
+
+  for obj in depsgraph.objects:
+    if (ignore and obj.ignore_render) or (collision and obj.ignore_collision):
       continue
-    obj_name = info.obj.name
+    obj_info = collect_obj_info(render_engine, obj, depsgraph, hidden_objs, space_view_3d, projection_matrix, view_matrix, always_set)
+    if obj_info is None:
+      continue
+
+    obj_name = obj_info.obj.name
     area = area_lookup[obj_name]
     if specific_area and area.name != specific_area: continue
   
     layer_queue = area_queue.setdefault(area, {}) # if area has no queue, create it
-    for mat_info in info.mats:
+    for mat_info in obj_info.mats:
       mat = mat_info[2]
       obj_queue = layer_queue.setdefault(int(mat.layer), {}) # if layer has no queue, create it
       if obj_name not in obj_queue: # if obj not already present in the layer's obj queue, create a shallow copy
-        obj_info = obj_queue[obj_name] = copy.copy(info)
+        obj_info = obj_queue[obj_name] = copy.copy(obj_info)
         obj_info.mats = []
       obj_queue[obj_name].mats.append(mat_info)
 

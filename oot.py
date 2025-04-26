@@ -2,10 +2,10 @@ import copy
 from typing import NamedTuple
 
 import bpy
-import numpy as np
+import mathutils
 
 from .material.parser import parse_f3d_rendermode_preset, F64RenderState
-from .common import ObjRenderInfo, draw_f64_obj, get_scene_render_state
+from .common import ObjRenderInfo, draw_f64_obj, collect_obj_info, get_scene_render_state
 from .properties import F64RenderSettings
 from .globals import F64_GLOBALS
 
@@ -64,7 +64,7 @@ DEFAULT_LAYERS = {
   "Transparent": ("G_RM_AA_ZB_XLU_SURF", "G_RM_AA_ZB_XLU_SURF2"), 
   "Overlay": ("G_RM_AA_ZB_OPA_SURF", "G_RM_AA_ZB_OPA_SURF2"),}
 
-def draw_oot_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.Depsgraph, objs_info: list[ObjRenderInfo]):
+def draw_oot_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.Depsgraph, hidden_objs: set[bpy.types.Object], space_view_3d: bpy.types.SpaceView3D, projection_matrix: mathutils.Matrix, view_matrix: mathutils.Matrix, always_set: bool):
   f64render_rs: F64RenderSettings = depsgraph.scene.f64render.render_settings
 
   layer_rendermodes = {} # TODO: should this be cached globally?
@@ -80,19 +80,23 @@ def draw_oot_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.Dep
   room_lookup = get_oot_room_childrens(depsgraph.scene)
   room_queue: dict[RoomRenderInfo, dict[int, dict[str, ObjRenderInfo]]] = {}
 
-  for info in objs_info:
-    if (ignore and info.obj.ignore_render) or collision and info.obj.ignore_collision:
+  for obj in depsgraph.objects:
+    if (ignore and obj.ignore_render) or (collision and obj.ignore_collision):
       continue
-    obj_name = info.obj.name
+    obj_info = collect_obj_info(render_engine, obj, depsgraph, hidden_objs, space_view_3d, projection_matrix, view_matrix, always_set)
+    if obj_info is None:
+      continue
+
+    obj_name = obj_info.obj.name
     room = room_lookup[obj_name]
     if specific_room and room.name != specific_room: continue
   
     layer_queue = room_queue.setdefault(room, {}) # if room has no queue, create it
-    for mat_info in info.mats:
+    for mat_info in obj_info.mats:
       mat = mat_info[2]
       obj_queue = layer_queue.setdefault(mat.layer, {}) # if layer has no queue, create it
       if obj_name not in obj_queue: # if obj not already present in the layer's obj queue, create a shallow copy
-        obj_info = obj_queue[obj_name] = copy.copy(info)
+        obj_info = obj_queue[obj_name] = copy.copy(obj_info)
         obj_info.mats = []
       obj_queue[obj_name].mats.append(mat_info)
     
