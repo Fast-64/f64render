@@ -96,7 +96,7 @@ def draw_sm64_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.De
     layer_queue = area_queue.setdefault(area, {}) # if area has no queue, create it
     for mat_info in obj_info.mats:
       mat = mat_info[2]
-      obj_queue = layer_queue.setdefault(int(mat.layer), {}) # if layer has no queue, create it
+      obj_queue = layer_queue.setdefault(int(mat.layer or "0"), {}) # if layer has no queue, create it
       if obj_name not in obj_queue: # if obj not already present in the layer's obj queue, create a shallow copy
         obj_info = obj_queue[obj_name] = copy.copy(obj_info)
         obj_info.mats = []
@@ -105,6 +105,6 @@ def draw_sm64_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.De
   for area, layer_queue in area_queue.items():
     render_state = area.render_state.copy()
     for layer, obj_queue in sorted(layer_queue.items(), key=lambda item: item[0]): # sort by layer
-      render_state.set_from_rendermode(layer_rendermodes[layer])
+      render_state.set_from_rendermode(layer_rendermodes.get(layer, layer_rendermodes[0]))
       for info in dict(sorted(obj_queue.items(), key=lambda item: item[0])): # sort by obj name
         draw_f64_obj(render_engine, render_state, obj_queue[info])

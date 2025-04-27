@@ -10,7 +10,7 @@ class F64Globals:
     self.sm64_area_lookup: dict|None = None
     self.oot_room_lookup: dict|None = None # oot
     self.rebuid_shaders = True
-    self.current_ucode = self.world_lighting = None
+    self.current_ucode = self.world_lighting = self.current_gamemode = None
 
   def clear_areas(self):
     self.sm64_area_lookup = None

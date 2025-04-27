@@ -219,7 +219,7 @@ class F64Material:
   prim_depth: tuple[float, float] = (0, 0)
   uv_basis: int = 0
   mip_count: int = 0
-  layer: int|str|None = 0
+  layer: int|str|None = None
 
 def quantize_direction(direction):
   return tuple(quantize(x, 8, -1, 1) for x in direction)

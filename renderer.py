@@ -197,9 +197,9 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
 
     for update in depsgraph.updates:
       if isinstance(update.id, bpy.types.Scene):
-        if F64_GLOBALS.current_ucode != update.id.f3d_type:
+        if F64_GLOBALS.current_ucode != update.id.f3d_type or F64_GLOBALS.current_gamemode != update.id.gameEditorMode:
           F64_GLOBALS.materials_cache = {}
-          F64_GLOBALS.current_ucode = update.id.f3d_type
+          F64_GLOBALS.current_ucode, F64_GLOBALS.current_gamemode = update.id.f3d_type, update.id.gameEditorMode
         world_lighting = update.id.fast64.renderSettings.useWorldSpaceLighting
         if world_lighting != F64_GLOBALS.world_lighting:
           F64_GLOBALS.world_lighting = world_lighting

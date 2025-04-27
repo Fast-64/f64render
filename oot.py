@@ -92,7 +92,7 @@ def draw_oot_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.Dep
     layer_queue = room_queue.setdefault(room, {}) # if room has no queue, create it
     for mat_info in obj_info.mats:
       mat = mat_info[2]
-      obj_queue = layer_queue.setdefault(mat.layer, {}) # if layer has no queue, create it
+      obj_queue = layer_queue.setdefault(mat.layer or "Opaque", {}) # if layer has no queue, create it
       if obj_name not in obj_queue: # if obj not already present in the layer's obj queue, create a shallow copy
         obj_info = obj_queue[obj_name] = copy.copy(obj_info)
         obj_info.mats = []
@@ -101,6 +101,6 @@ def draw_oot_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.Dep
     for room, layer_queue in room_queue.items():
       render_state = room.render_state.copy()
       for layer, obj_queue in sorted(layer_queue.items(), key=lambda item: item[0]): # sort by layer
-        render_state.set_from_rendermode(layer_rendermodes[layer])
+        render_state.set_from_rendermode(layer_rendermodes.get(layer, layer_rendermodes["Opaque"]))
         for info in dict(sorted(obj_queue.items(), key=lambda item: item[0])): # sort by obj name
           draw_f64_obj(render_engine, render_state, obj_queue[info])
