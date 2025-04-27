@@ -130,9 +130,9 @@ def rebuild_shaders(_scene, _context):
 class F64RenderSettings(bpy.types.PropertyGroup):
   use_atomic_rendering: bpy.props.BoolProperty(
     name="Use Atomic Rendering",
-    default=False,
+    default=True,
     description="Atomic rendering will draw to a depth and color buffer seperately, which allows for proper blender and decal emulation.\n"
-    "This may cause artifacts if your GPU does not support the interlock extension.",
+    "This may cause artifacts if your GPU does not support the interlock extension",
     update=rebuild_shaders
   )
   sources_tab: bpy.props.BoolProperty(name="Default Sources")
