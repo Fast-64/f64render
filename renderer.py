@@ -1,4 +1,6 @@
-import math, struct, pathlib, time
+import math
+import pathlib
+import time
 
 import bpy
 import mathutils
