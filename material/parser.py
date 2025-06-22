@@ -233,9 +233,9 @@ def f64_parse_obj_light(f64_light: F64Light, obj: bpy.types.Object, set_light_di
 DEFAULT_LIGHT_DIR = quantize_direction(mathutils.Vector((0x49, 0x49, 0x49)).normalized())
 
 def f64_material_parse(f3d_mat: "F3DMaterialProperty", always_set: bool, set_light_dir: bool) -> F64Material:
-  global F64_GLOBALS
   from fast64_internal.f3d.f3d_material import all_combiner_uses
   from fast64_internal.f3d.f3d_writer import lightDataToObj
+
   cc_uses = all_combiner_uses(f3d_mat)
   rdp = f3d_mat.rdp_settings
 

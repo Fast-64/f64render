@@ -16,8 +16,6 @@ class AreaRenderInfo(NamedTuple): # areas, etc
     return hash(self.name)
 
 def get_sm64_area_childrens(scene: bpy.types.Scene):
-  global F64_GLOBALS
-  
   if F64_GLOBALS.sm64_area_lookup is not None:
     return F64_GLOBALS.sm64_area_lookup
 

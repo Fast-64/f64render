@@ -16,8 +16,6 @@ class RoomRenderInfo(NamedTuple):
     return hash(self.name)
 
 def get_oot_room_childrens(scene: bpy.types.Scene):
-  global F64_GLOBALS
-
   if F64_GLOBALS.oot_room_lookup is not None:
     return F64_GLOBALS.oot_room_lookup
 

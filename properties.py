@@ -120,11 +120,9 @@ class TextureProperty(PropertyGroup):
         s_t(col, "Shift")
 
 def update_all_materials(_scene, _context):
-  global F64_GLOBALS
   F64_GLOBALS.materials_cache = {}
 
 def rebuild_shaders(_scene, _context):
-  global F64_GLOBALS
   F64_GLOBALS.rebuid_shaders = True
 
 class F64RenderSettings(bpy.types.PropertyGroup):

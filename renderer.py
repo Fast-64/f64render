@@ -21,7 +21,6 @@ yup_to_zup = mathutils.Quaternion((1, 0, 0), math.radians(90.0)).to_matrix().to_
 MISSING_TEXTURE_COLOR = (0, 0, 0, 1)
 
 def cache_del_by_mesh(mesh_name):
-  global F64_GLOBALS
   for key in list(F64_GLOBALS.meshCache.keys()):
     if F64_GLOBALS.meshCache[key].mesh_name == mesh_name:
       del F64_GLOBALS.meshCache[key]
@@ -194,7 +193,6 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
       self.shader_2d = gpu.shader.create_from_info(shader_info)                             
 
   def mesh_change_listener(scene, depsgraph):
-    global F64_GLOBALS
     # print("################ MESH CHANGE LISTENER ################")  
 
     for update in depsgraph.updates:
@@ -213,7 +211,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
       is_obj_update = isinstance(update.id, bpy.types.Object)
 
       # support animating lights without uncaching materials, check if a light object was updated
-      if ((is_obj_update and isinstance(update.id.data, bpy.types.Light)) and update.id.data.name in F64_GLOBALS.obj_lights):
+      if ((is_obj_update and isinstance(update.id.data, bpy.types.Light)) and update.id.name in F64_GLOBALS.obj_lights):
         f64_parse_obj_light(
           F64_GLOBALS.obj_lights[update.id.name], 
           update.id, 
@@ -226,11 +224,9 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
 
   @bpy.app.handlers.persistent
   def on_file_load(_context):
-    global F64_GLOBALS
     F64_GLOBALS.clear()
 
   def view_update(self, context, depsgraph):
-    global F64_GLOBALS
     if self.draw_handler is None:
       self.draw_handler = bpy.types.SpaceView3D.draw_handler_add(self.draw_scene, (context, depsgraph), 'WINDOW', 'POST_VIEW')
 
@@ -251,8 +247,6 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
       Stats(profile).strip_dirs().sort_stats(SortKey.CUMULATIVE).print_stats()
 
   def draw_scene(self, context, depsgraph):
-    global F64_GLOBALS
-    
     # TODO: fixme, after reloading this script during dev, something calls this function
     #       with an invalid reference (viewport?)
     if repr(self).endswith("invalid>"):
@@ -374,7 +368,6 @@ def get_panels():
     return panels
 
 def register():
-  global F64_GLOBALS
   bpy.types.RenderEngine.f64_render_engine = bpy.props.PointerProperty(type=Fast64RenderEngine)
   for panel in get_panels():
     panel.COMPAT_ENGINES.add('FAST64_RENDER_ENGINE')
