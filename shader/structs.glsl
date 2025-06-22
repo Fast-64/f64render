@@ -17,7 +17,7 @@ struct TileConf
 
 struct UBO_Material
 {
-  TileConf texConfs[8]; // TODO: should these two be part of seperate uniform buffers?
+  TileConf texConfs[8]; // TODO: should these two be part of separate uniform buffers?
   Light lights[8];
   ivec4 blender[2];
 
