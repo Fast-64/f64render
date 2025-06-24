@@ -67,7 +67,7 @@ DEFAULT_LAYERS = (("G_RM_ZB_OPA_SURF", "G_RM_ZB_OPA_SURF2"),
                       ("G_RM_AA_ZB_XLU_DECAL", "G_RM_AA_ZB_XLU_DECAL2"), 
                       ("G_RM_AA_ZB_XLU_INTER", "G_RM_AA_ZB_XLU_INTER2"))
 
-def draw_sm64_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.Depsgraph, hidden_objs: set[bpy.types.Object], space_view_3d: bpy.types.SpaceView3D, projection_matrix: mathutils.Matrix, view_matrix: mathutils.Matrix, always_set: bool):
+def draw_sm64_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.Depsgraph, hidden_objs_names: set[str], space_view_3d: bpy.types.SpaceView3D, projection_matrix: mathutils.Matrix, view_matrix: mathutils.Matrix, always_set: bool):
   f64render_rs: F64RenderSettings = depsgraph.scene.f64render.render_settings
 
   layer_rendermodes = {} # TODO: should this be cached globally?
