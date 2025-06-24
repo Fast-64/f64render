@@ -181,7 +181,6 @@ def collect_obj_info(render_engine: "Fast64RenderEngine", obj: bpy.types.Object,
     if render_engine.draw_range_impl:
       render_obj.batch = batch_for_shader(vert_buf, render_obj.indices)
     else: # we need to create batches for each material
-      render_obj.batch = []
       if not obj.material_slots: # if no material slot, we only have one batch for the whole geo
         render_obj.batch = [batch_for_shader(vert_buf, render_obj.indices)]
       else:
