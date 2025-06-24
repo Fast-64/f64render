@@ -62,7 +62,7 @@ DEFAULT_LAYERS = {
   "Transparent": ("G_RM_AA_ZB_XLU_SURF", "G_RM_AA_ZB_XLU_SURF2"), 
   "Overlay": ("G_RM_AA_ZB_OPA_SURF", "G_RM_AA_ZB_OPA_SURF2"),}
 
-def draw_oot_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.Depsgraph, hidden_objs: set[bpy.types.Object], space_view_3d: bpy.types.SpaceView3D, projection_matrix: mathutils.Matrix, view_matrix: mathutils.Matrix, always_set: bool):
+def draw_oot_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.Depsgraph, hidden_objs_names: set[str], space_view_3d: bpy.types.SpaceView3D, projection_matrix: mathutils.Matrix, view_matrix: mathutils.Matrix, always_set: bool):
   f64render_rs: F64RenderSettings = depsgraph.scene.f64render.render_settings
 
   layer_rendermodes = {} # TODO: should this be cached globally?
@@ -83,7 +83,7 @@ def draw_oot_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.Dep
     room = room_lookup[obj_name]
     if (ignore and obj.ignore_render) or (collision and obj.ignore_collision) or (specific_room and room.name != specific_room):
       continue
-    obj_info = collect_obj_info(render_engine, obj, depsgraph, hidden_objs, space_view_3d, projection_matrix, view_matrix, always_set)
+    obj_info = collect_obj_info(render_engine, obj, depsgraph, hidden_objs_names, space_view_3d, projection_matrix, view_matrix, always_set)
     if obj_info is None:
       continue
   
