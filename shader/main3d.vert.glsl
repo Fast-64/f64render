@@ -30,7 +30,7 @@ void main()
 
   inputUV = geoModeSelect(G_TEX_GEN, inUV, normScreen.xy * 0.5 + 0.5);
 
-  inputUV *= textureSize(getTextureSampler(material.uvBasis), 0);
+  inputUV *= material.texSize;
 
   // @TODO: uvgen (f3d + t3d)
   // forward CC (@TODO: do part of this here? e.g. prim/env/shade etc.)

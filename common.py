@@ -31,18 +31,18 @@ if typing.TYPE_CHECKING:
 
 FALLBACK_MATERIAL = F64Material(state=F64RenderState(cc=SOLID_CC))
 
-LIGHT_STRUCT = "4f 3f 4x"           # color, direction, padding
-TILE_STRUCT = "2f 2f 2f 2f i 12x"    # mask, shift, low, high, flags, padding
+LIGHT_STRUCT = "4f 3f 4x"         # color, direction, padding
+TILE_STRUCT = "2f 2f 2f 2f i 12x" # mask, shift, low, high, flags, padding
 
 UNIFORM_BUFFER_STRUCT = struct.Struct(
-  (TILE_STRUCT * 8) +               # texture configurations
-  (LIGHT_STRUCT * 8) +              # lights
-  "8i"                              # blender
-  "16i"                             # color-combiner settings
-  "i i i i"                         # geoMode, other-low, other-high, flags
-  "4f 4f 4f 4f"                     # prim, prim_lod, prim-depth, env, ambient
-  "3f f 3f i 3f i"                  # ck center, alpha clip, ck scale, light count, width, uv basis
-  "6f i 4x"                         # k0-k5, mipmap count, padding
+  (TILE_STRUCT * 8) +             # texture configurations
+  (LIGHT_STRUCT * 8) +            # lights
+  "8i"                            # blender
+  "16i"                           # color-combiner settings
+  "i i i i"                       # geoMode, other-low, other-high, flags
+  "4f 4f 4f 4f"                   # prim, prim_lod, prim-depth, env, ambient
+  "3f f 3f i 3f i"                # ck center, alpha clip, ck scale, light count, width, mipmap count
+  "6f 2i"                         # k0-k5, tex size
 )
 
 def get_struct_ubo_size(s: struct.Struct):
@@ -138,9 +138,9 @@ def draw_f64_obj(render_engine: "Fast64RenderEngine", render_state: F64RenderSta
       *render_state.ck[3:6],
       render_state.light_count,
       *render_state.ck[6:9],
-      f64mat.uv_basis,
-      *render_state.convert,
       f64mat.mip_count,
+      *render_state.convert,
+      *f64mat.tex_size,
     )
     
     info.render_obj.ubo_mat_data[mat_idx].update(info.render_obj.mat_data[mat_idx])                        

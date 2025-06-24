@@ -217,7 +217,7 @@ class F64Material:
   othermode_l: int = 0
   othermode_h: int = 0
   prim_depth: tuple[float, float] = (0, 0)
-  uv_basis: int = 0
+  tex_size: tuple[int, int] = (0, 0)
   mip_count: int = 0
   layer: int|str|None = None
 
@@ -278,7 +278,11 @@ def f64_material_parse(f3d_mat: "F3DMaterialProperty", always_set: bool, set_lig
   if use_tex0: state.tex_confs[0] = get_tile_conf(f3d_mat.tex0)
   if use_tex1: state.tex_confs[1] = get_tile_conf(f3d_mat.tex1)
   # TODO: use check for multitex function in glTF pr?
-  if use_tex0 and use_tex1: f64mat.uv_basis = int(f3d_mat.uv_basis.removeprefix("TEXEL"))
+
+  uv_basis = None
+  if use_tex0 and use_tex1: uv_basis = int(f3d_mat.uv_basis.removeprefix("TEXEL"))
+  elif use_tex0 or use_tex1: uv_basis = 0 if use_tex0 else 1
+  if uv_basis is not None: f64mat.tex_size = tuple(getattr(f3d_mat, f"tex{uv_basis}").get_tex_size())
 
   if cc_uses["Texture 0"] and cc_uses["Texture 1"]: f64mat.mip_count = f3d_mat.rdp_settings.num_textures_mipmapped - 1
   f64mat.prim_depth = (rdp.prim_depth.z, rdp.prim_depth.dz)

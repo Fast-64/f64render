@@ -72,6 +72,20 @@ vec4 sampleSampler(in const sampler2D tex, in const TileConf tileConf, in vec2 u
   }
 }
 
+vec4 sampleIndex(in const uint textureIndex, in const vec2 uvCoord, in const uint texFilter) {
+  TileConf tileConf = material.texConfs[textureIndex];
+  switch (textureIndex) {
+    default: return sampleSampler(tex0, tileConf, uvCoord, texFilter);
+    case 1: return sampleSampler(tex1, tileConf, uvCoord, texFilter);
+    case 2: return sampleSampler(tex2, tileConf, uvCoord, texFilter);
+    case 3: return sampleSampler(tex3, tileConf, uvCoord, texFilter);
+    case 4: return sampleSampler(tex4, tileConf, uvCoord, texFilter);
+    case 5: return sampleSampler(tex5, tileConf, uvCoord, texFilter);
+    case 6: return sampleSampler(tex6, tileConf, uvCoord, texFilter);
+    case 7: return sampleSampler(tex7, tileConf, uvCoord, texFilter);
+  }
+}
+
 float computeLOD(inout uint tileIndex0, inout uint tileIndex1) {
   // https://github.com/rt64/rt64/blob/0ca92eeb6c2f58ce3581c65f87f7261b8ac0fea0/src/shaders/TextureSampler.hlsli#L18
   if (textLOD() == G_TL_TILE)
@@ -256,8 +270,8 @@ void main()
   uint tex1Index = 1;
   const float lodFraction = computeLOD(tex0Index, tex1Index);
 
-  vec4 texData0 = sampleSampler(getTextureSampler(tex0Index), material.texConfs[tex0Index], inputUV, texFilter);
-  vec4 texData1 = sampleSampler(getTextureSampler(tex1Index), material.texConfs[tex1Index], inputUV, texFilter);
+  vec4 texData0 = sampleIndex(tex0Index, inputUV, texFilter);
+  vec4 texData1 = sampleIndex(tex1Index, inputUV, texFilter);
 
   // @TODO: emulate other formats, e.g. quantization?
 

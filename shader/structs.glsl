@@ -39,10 +39,10 @@ struct UBO_Material
   vec3 ckScale;
   uint numLights;
   vec3 ckWidth;
-  uint uvBasis;
+  int mipCount;
   vec4 k0123;
   vec2 k45;
-  int mipCount;
+  uvec2 texSize;
 };
 
 #define GEO_MODE     material.modes.x
