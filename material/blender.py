@@ -15,5 +15,5 @@ BL_INP = {
 }
 
 @functools.cache
-def get_blender_settings(blend_cycle1: str, blend_cycle2: str) -> tuple:
+def get_blender_settings(blend_cycle1: tuple[str, str, str, str], blend_cycle2: tuple[str, str, str, str]) -> tuple:
   return tuple(BL_INP[x] for x in blend_cycle1 + blend_cycle2)
