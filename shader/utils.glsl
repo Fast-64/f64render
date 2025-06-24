@@ -62,7 +62,7 @@ vec4 wrappedMirrorSample(const sampler2D tex, ivec2 uv, const vec2 mask, const v
   return texelFetch(tex, uv, 0);
 }
 
-const sampler2D getTextureSampler(in const uint textureIndex) {
+sampler2D getTextureSampler(in const uint textureIndex) {
   switch (textureIndex) {
     default: return tex0;
     case 1: return tex1;
