@@ -24,7 +24,7 @@ def get_oot_room_childrens(scene: bpy.types.Scene):
   scene_objs: list[bpy.types.Object] = []
   room_objs: list[bpy.types.Object] = []
 
-  def get_room_children(obj: bpy.types.Object, name: str = ""):
+  def get_room_children(obj: bpy.types.Object, name: str):
     for child in sorted(obj.children, key=lambda item: item.name): 
       if child not in room_objs:
         oot_room_lookup[child.name] = RoomRenderInfo(render_state, name)
