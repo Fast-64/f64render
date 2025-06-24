@@ -96,9 +96,9 @@ def draw_oot_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.Dep
         obj_info.mats = []
       obj_queue[obj_name].mats.append(mat_info)
     
-    for room, layer_queue in room_queue.items():
-      render_state = room.render_state.copy()
-      for layer, obj_queue in sorted(layer_queue.items(), key=lambda item: item[0]): # sort by layer
-        render_state.set_from_rendermode(layer_rendermodes.get(layer, layer_rendermodes["Opaque"]))
-        for info in dict(sorted(obj_queue.items(), key=lambda item: item[0])): # sort by obj name
-          draw_f64_obj(render_engine, render_state, obj_queue[info])
+  for room, layer_queue in room_queue.items():
+    render_state = room.render_state.copy()
+    for layer, obj_queue in sorted(layer_queue.items(), key=lambda item: item[0]): # sort by layer
+      render_state.set_from_rendermode(layer_rendermodes.get(layer, layer_rendermodes["Opaque"]))
+      for info in dict(sorted(obj_queue.items(), key=lambda item: item[0])): # sort by obj name
+        draw_f64_obj(render_engine, render_state, obj_queue[info])
