@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "f64render"
-version = "1.0.0"
+version = "0.0.1"
 name = "f64render"
 tagline = "Render engine for fast64 materials"
 maintainer = "Max Bebök, Fast64 community"
