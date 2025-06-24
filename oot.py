@@ -70,7 +70,7 @@ def draw_oot_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.Dep
   for layer, (cycle1, cycle2) in DEFAULT_LAYERS.items():
     if world:
       defaults = world.ootDefaultRenderModes
-      cycle1, cycle2 = (getattr(defaults, f"{layer.lower()}Cycle{cycle}") for cycle in range(1, 3))
+      cycle1, cycle2 = (getattr(defaults, f"{layer.lower()}Cycle{cycle}") for cycle in (1, 2))
     layer_rendermodes[layer] = parse_f3d_rendermode_preset(cycle1, cycle2)
   
   ignore, collision = f64render_rs.render_type == "IGNORE", f64render_rs.render_type == "COLLISION"
