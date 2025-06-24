@@ -32,7 +32,7 @@ if typing.TYPE_CHECKING:
 FALLBACK_MATERIAL = F64Material(state=F64RenderState(cc=SOLID_CC))
 
 LIGHT_STRUCT = "4f 3f 4x"           # color, direction, padding
-TILE_STRUCT = "2f 2f 2f 2f i 12x"    # mask, shift, low, high, padding, flags
+TILE_STRUCT = "2f 2f 2f 2f i 12x"    # mask, shift, low, high, flags, padding
 
 UNIFORM_BUFFER_STRUCT = struct.Struct(
   (TILE_STRUCT * 8) +               # texture configurations
