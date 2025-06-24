@@ -341,8 +341,9 @@ class F64RenderSettingsPanel(bpy.types.Panel):
     f64render_rs: F64RenderSettings = context.scene.f64render.render_settings
     f64render_rs.draw_props(self.layout, context.scene.gameEditorMode)
 
-def draw_render_settings(self, context):
-  if context.scene.render.engine == Fast64RenderEngine.bl_idname:
+def draw_render_settings(self, context: bpy.types.Context):
+  space_data = context.space_data
+  if context.scene.render.engine == Fast64RenderEngine.bl_idname and space_data.type == "VIEW_3D" and space_data.shading.type in {"MATERIAL", "RENDERED"}:
     self.layout.popover(F64RenderSettingsPanel.bl_idname)
 
 # By default blender will hide quite a few panels like materials or vertex attributes
