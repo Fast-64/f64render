@@ -61,8 +61,8 @@ def mesh_to_buffers(mesh: bpy.types.Mesh) -> MeshBuffers:
   # read normals (these contain pre-calculated normals handling  flat, smooth, custom split normals)
   if bpy.app.version < (4, 0, 0):
       mesh.calc_normals_split()
-      corner_norm = np.empty((len(mesh.loops) * 3, 3), dtype=np.float32)
-      mesh.loops.foreach_get('normal', corner_norm)
+      corner_norm = np.empty((len(mesh.loops), 3), dtype=np.float32)
+      mesh.loops.foreach_get('normal', corner_norm.ravel())
   else:
     corner_norm = np.empty((len(mesh.corner_normals), 3), dtype=np.float32)
     mesh.corner_normals.foreach_get('vector', corner_norm.ravel())
