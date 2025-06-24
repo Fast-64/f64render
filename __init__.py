@@ -12,14 +12,13 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 bl_info = {
-    "name" : "F64renderer",
-    "author" : "Max Bebök",
-    "description" : "",
+    "name" : "f64render",
+    "author" : "Max Bebök, Fast64 community",
+    "description" : "Render engine for fast64 materials.",
     "blender" : (4, 2, 0),
     "version" : (0, 0, 1),
-    "location" : "",
-    "warning" : "",
-    "category" : "Generic"
+    "location" : "Render Properties > Render Engine",
+    "category" : "3D View"
 }
 
 from . import auto_load
