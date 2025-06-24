@@ -151,7 +151,7 @@ def draw_f64_obj(render_engine: "Fast64RenderEngine", render_state: F64RenderSta
     else:
       info.render_obj.batch[mat_idx].draw(render_engine.shader)
 
-def collect_obj_info(render_engine: "Fast64RenderEngine", obj: bpy.types.Object, depsgraph: bpy.types.Depsgraph, hidden_objs: set[bpy.types.Object], space_view_3d: bpy.types.SpaceView3D, projection_matrix: mathutils.Matrix, view_matrix: mathutils.Matrix, always_set: bool, set_light_dir = True):
+def collect_obj_info(render_engine: "Fast64RenderEngine", obj: bpy.types.Object, depsgraph: bpy.types.Depsgraph, hidden_objs_names: set[str], space_view_3d: bpy.types.SpaceView3D, projection_matrix: mathutils.Matrix, view_matrix: mathutils.Matrix, always_set: bool, set_light_dir = True):
   if (obj.name in hidden_objs or
       obj.type not in {"MESH", "CURVE", "SURFACE", "FONT"} or
       obj.data is None or
