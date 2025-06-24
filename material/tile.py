@@ -1,4 +1,5 @@
-import gpu, bpy
+import bpy
+import gpu
 
 from dataclasses import dataclass
 import numpy as np
