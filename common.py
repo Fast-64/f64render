@@ -70,16 +70,29 @@ def get_scene_render_state(scene: bpy.types.Scene):
   return state
 
 def draw_f64_obj(render_engine: "Fast64RenderEngine", render_state: F64RenderState, info: ObjRenderInfo):
-  mvp = np.array(info.mvp_matrix)
-  bbox = (mvp @ info.render_obj.bound_box.T).T  # apply view and projection
-  bbox = bbox[:, :3] / bbox[:, 3, None]  # perspective divide
+  mvp = info.mvp_matrix 
+  bbox = info.render_obj.bounding_box
 
-  # check if any orientation (so [:, :3]) of all corners is fully outside the -1 to 1 range
-  if (np.all(bbox[:, 0] < -1) or np.all(bbox[:, 0] > 1) and
-    np.all(bbox[:, 1] < -1) or np.all(bbox[:, 1] > 1) and
-    np.all(bbox[:, 2] < -1) or np.all(bbox[:, 2] > 1)):
-    if not info.obj.use_f3d_culling: # if obj is not meant to be culled in game, apply all materials
-      for mat_idx, indices_count, f64mat in info.mats: render_state.set_values_from_cache(f64mat.state)
+  # we need to figure out where what the min max range is for all axis, but we need to do this after projection
+  # would've been a neat optimization but it does not work :(
+  min_x = min_y = min_z = float('inf')
+  max_x = max_y = max_z = float('-inf')
+
+  for v in bbox:
+    v = mvp @ v
+    x, y, z = v.xyz / v.w
+
+    if x < min_x: min_x = x
+    if x > max_x: max_x = x
+    if y < min_y: min_y = y
+    if y > max_y: max_y = y
+    if z < min_z: min_z = z
+    if z > max_z: max_z = z
+
+  if (max_x < -1 or min_x > 1) or (max_y < -1 or min_y > 1) or (max_z < -1 or min_z > 1):
+    if not info.obj.use_f3d_culling:
+      for _, _, f64mat in info.mats:
+        render_state.set_values_from_cache(f64mat.state)
     return
 
   render_engine.shader.uniform_float("matMVP", info.mvp_matrix)
@@ -125,7 +138,7 @@ def collect_obj_info(render_engine: "Fast64RenderEngine", obj: bpy.types.Object,
 
     render_obj = F64_GLOBALS.meshCache[mesh_id] = mesh_to_buffers(mesh)
     render_obj.mesh_name = obj.data.name
-    render_obj.bound_box = np.array([[*corner, 1] for corner in obj.bound_box])
+    render_obj.bounding_box = [mathutils.Vector((*corner, 1)) for corner in obj.bound_box]
 
     mat_count = max(len(obj.material_slots), 1)
     vert_buf = create_vert_buf(render_engine.vbo_format,
