@@ -99,7 +99,7 @@ def draw_oot_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.Dep
         obj_info.mats = []
       obj_queue[obj_name].mats.append(mat_info)
 
-  for layer in {"Opaque", "Transparent", "Overlay"}:
+  for layer in ("Opaque", "Transparent", "Overlay"):
     room_queue = layer_queue.get(layer)
     if room_queue is None: continue
     for room, obj_queue in sorted(room_queue.items(), key=lambda item: item[0].name): # sort by layer
