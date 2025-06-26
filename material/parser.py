@@ -172,6 +172,7 @@ class F64Rendermode:
   blend: str = 'NONE'
   depth_test: str = 'LESS_EQUAL'
   depth_write: bool = True
+  alpha_clip: float = -1
 
 
 @dataclass
@@ -192,7 +193,6 @@ class F64RenderState:
   ck: tuple[float, float, float, float, float, float, float, float]|None = None
   convert: tuple[float, float, float, float, float, float]|None = None
   cc: tuple[float, float, float, float, float, float, float, float, float, float, float, float, float, float, float, float]|None = None
-  alpha_clip: float|None = None
   render_mode: F64Rendermode|None = None
   flags: int = 0
   geo_mode: int = 0
@@ -239,9 +239,10 @@ class F64RenderState:
       if t is None: tex_data.extend(mask(None, 9))
       else: tex_data.extend(mask(t.values, 9))
     
-    blender, flags = None, self.flags
+    blender, alpha_clip, flags = None, -1, self.flags
     if self.render_mode is not None: 
       blender = self.render_mode.blender
+      alpha_clip = self.render_mode.alpha_clip
       flags |= self.render_mode.flags
 
     ck = self.ck
@@ -264,7 +265,7 @@ class F64RenderState:
         *mask(self.env_color, 4),
         *mask(self.ambient_color, 4),
         *mask(ck[:3], 3),
-        mask_single(self.alpha_clip),
+        mask_single(alpha_clip),
         *mask(ck[3:6], 3),
         mask_single(self.light_count),
         *mask(ck[6:9], 3),
@@ -279,6 +280,7 @@ class F64RenderState:
     self.cached_values = (self.cached_values & other.cached_mask) | other.cached_values
     for i, other_conf in enumerate(other.tex_confs):
       if other_conf is not None: self.tex_confs[i] = other_conf
+    if other.render_mode is not None: self.render_mode = other.render_mode
 
   def copy(self):
     new = copy.copy(self)
@@ -291,9 +293,9 @@ class F64RenderState:
       self.render_mode.depth_test = 'EQUAL'
       self.render_mode.flags |= DRAW_FLAG_DECAL
     if rendermode.cvg_x_alpha:
-      self.alpha_clip = 0.49
+      self.render_mode.alpha_clip = 0.49
     else:
-      self.alpha_clip = -1
+      self.render_mode.alpha_clip = -1
     if rendermode.force_bl and rendermode.blend_cycle2 == ("G_BL_CLR_IN", "G_BL_A_IN", "G_BL_CLR_MEM", "G_BL_1MA"):
       self.render_mode.blend = "ALPHA"
       self.render_mode.flags |= DRAW_FLAG_ALPHA_BLEND

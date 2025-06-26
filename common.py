@@ -17,7 +17,6 @@ from .material.parser import (
   UNIFORM_BUFFER_STRUCT,
   F64Material,
   F64RenderState,
-  F64Rendermode,
   F64Light,
 )
 from .material.cc import SOLID_CC
@@ -59,8 +58,6 @@ def get_scene_render_state(scene: bpy.types.Scene):
     ck=tuple((*quantize_srgb(f64render_rs.default_key_center, False), *f64render_rs.default_key_scale, *f64render_rs.default_key_width)),
     convert=quantize_tuple(f64render_rs.default_convert, 9.0, -1.0, 1.0),
     cc=SOLID_CC,
-    alpha_clip=-1,
-    render_mode=F64Rendermode(),
     tex_confs=([get_tile_conf(getattr(f64render_rs, f"default_tex{i}")) for i in range(0, 8)]),
   )
   state.lights[0] = F64Light(quantize_srgb(fast64_rs.light0Color, force_alpha=True), quantize_direction(fast64_rs.light0Direction))
