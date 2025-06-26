@@ -292,6 +292,8 @@ class F64RenderState:
       self.render_mode.flags |= DRAW_FLAG_DECAL
     if rendermode.cvg_x_alpha:
       self.alpha_clip = 0.49
+    else:
+      self.alpha_clip = -1
     if rendermode.force_bl and rendermode.blend_cycle2 == ("G_BL_CLR_IN", "G_BL_A_IN", "G_BL_CLR_MEM", "G_BL_1MA"):
       self.render_mode.blend = "ALPHA"
       self.render_mode.flags |= DRAW_FLAG_ALPHA_BLEND
