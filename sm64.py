@@ -74,8 +74,11 @@ def draw_sm64_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.De
   world = depsgraph.scene.world
   for layer, (cycle1, cycle2) in enumerate(DEFAULT_LAYERS):
     if world:
-      cycle1, cycle2 = (getattr(world, f"draw_layer_{layer}_cycle_{cycle}") for cycle in range(1, 3))
-    layer_rendermodes[layer] = parse_f3d_rendermode_preset(cycle1, cycle2)
+      cycle1, cycle2 = (getattr(world, f"draw_layer_{layer}_cycle_{cycle}") for cycle in (1, 2))
+    rm_state = F64RenderState()
+    rm_state.set_from_rendermode(parse_f3d_rendermode_preset(cycle1, cycle2))
+    rm_state.save_cache()
+    layer_rendermodes[layer] = rm_state
 
   ignore, collision = f64render_rs.render_type == "IGNORE", f64render_rs.render_type == "COLLISION"
   specific_area = f64render_rs.sm64_specific_area.name if f64render_rs.sm64_specific_area else None
@@ -103,7 +106,6 @@ def draw_sm64_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.De
   for area, layer_queue in area_queue.items():
     render_state = area.render_state.copy()
     for layer, obj_queue in sorted(layer_queue.items(), key=lambda item: item[0]): # sort by layer
-      render_state.set_from_rendermode(layer_rendermodes.get(layer, layer_rendermodes[0]))
-      render_state.save_cache()
+      render_state.set_values_from_cache(layer_rendermodes[layer])
       for info in dict(sorted(obj_queue.items(), key=lambda item: item[0])): # sort by obj name
         draw_f64_obj(render_engine, render_state, obj_queue[info])

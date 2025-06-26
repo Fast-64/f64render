@@ -71,7 +71,10 @@ def draw_oot_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.Dep
     if world:
       defaults = world.ootDefaultRenderModes
       cycle1, cycle2 = (getattr(defaults, f"{layer.lower()}Cycle{cycle}") for cycle in (1, 2))
-    layer_rendermodes[layer] = parse_f3d_rendermode_preset(cycle1, cycle2)
+    rm_state = F64RenderState()
+    rm_state.set_from_rendermode(parse_f3d_rendermode_preset(cycle1, cycle2))
+    rm_state.save_cache()
+    layer_rendermodes[layer] = rm_state
   
   ignore, collision = f64render_rs.render_type == "IGNORE", f64render_rs.render_type == "COLLISION"
   specific_room = f64render_rs.oot_specific_room.name if f64render_rs.oot_specific_room else None
@@ -99,8 +102,7 @@ def draw_oot_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.Dep
   for room, layer_queue in room_queue.items():
     render_state = room.render_state.copy()
     for layer, obj_queue in sorted(layer_queue.items(), key=lambda item: item[0]): # sort by layer
-      render_state.set_from_rendermode(layer_rendermodes.get(layer, layer_rendermodes["Opaque"]))
-      render_state.save_cache()
+      render_state.set_values_from_cache(layer_rendermodes.get(layer, layer_rendermodes["Opaque"]))
       for info in dict(sorted(obj_queue.items(), key=lambda item: item[0])): # sort by obj name
         draw_f64_obj(render_engine, render_state, obj_queue[info])
 
