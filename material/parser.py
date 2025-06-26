@@ -272,7 +272,7 @@ class F64RenderState:
         *mask(self.convert, 6),
         *mask(self.tex_size, 2),
       ),
-      dtype=np.uint8
+      dtype=np.uint64
     )
   
   def set_values_from_cache(self, other: "F64RenderState"):
