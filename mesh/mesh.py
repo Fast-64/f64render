@@ -19,7 +19,6 @@ class MeshBuffers:
     index_offsets: np.ndarray # offsets for each material in the index array
   # render data:
     batch: list[gpu.types.GPUBatch]|gpu.types.GPUBatch
-    mat_data: list[np.ndarray]
     ubo_mat_data: list[gpu.types.GPUUniformBuf]
     materials: list[F64Material] = None
     bounding_box: np.ndarray = None

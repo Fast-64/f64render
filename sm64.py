@@ -104,5 +104,6 @@ def draw_sm64_scene(render_engine: "Fast64RenderEngine", depsgraph: bpy.types.De
     render_state = area.render_state.copy()
     for layer, obj_queue in sorted(layer_queue.items(), key=lambda item: item[0]): # sort by layer
       render_state.set_from_rendermode(layer_rendermodes.get(layer, layer_rendermodes[0]))
+      render_state.save_cache()
       for info in dict(sorted(obj_queue.items(), key=lambda item: item[0])): # sort by obj name
         draw_f64_obj(render_engine, render_state, obj_queue[info])

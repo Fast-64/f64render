@@ -2,6 +2,7 @@ import copy
 from dataclasses import dataclass
 import dataclasses
 import functools
+import struct
 import bpy
 import mathutils
 import numpy as np
@@ -145,19 +146,39 @@ def parse_f3d_mat_rendermode(f3d_mat):
     result.blend_cycle2 = (rdp.blend_p2, rdp.blend_a2, rdp.blend_m2, rdp.blend_b2)
   return result
 
+LIGHT_STRUCT = "4f 3f 4x"         # color, direction, padding
+TILE_STRUCT = "2f 2f 2f 2f i 12x" # mask, shift, low, high, flags, padding
+
+UNIFORM_BUFFER_STRUCT = struct.Struct(
+  (TILE_STRUCT * 8) +             # texture configurations
+  (LIGHT_STRUCT * 8) +            # lights
+  "8i"                            # blender
+  "16i"                           # color-combiner settings
+  "i i i i"                       # geoMode, other-low, other-high, flags
+  "4f 4f 4f 4f"                   # prim, prim_lod, prim-depth, env, ambient
+  "3f f 3f i 3f i"                # ck center, alpha clip, ck scale, light count, width, mipmap count
+  "6f 2i"                         # k0-k5, tex size
+)
+# version of the uniform buffer with all ints
+UNIFORM_BUFFER_MASK_STRUCT = struct.Struct(UNIFORM_BUFFER_STRUCT.format.replace("f", "I").replace("i", "I"))
+
 F64Color = tuple[float, float, float, float]
+
+
 @dataclass
 class F64Rendermode:
-  blender: tuple=(0, 0, 0, 0, 0, 0, 0, 0)
+  blender: tuple[int, int, int, int, int, int, int, int] = (0, 0, 0, 0, 0, 0, 0, 0)
   flags: int = 0
   blend: str = 'NONE'
   depth_test: str = 'LESS_EQUAL'
   depth_write: bool = True
 
+
 @dataclass
 class F64Light:
   color: F64Color = (0, 0, 0, 0)
   direction: tuple[float, float, float]|None = None
+
 
 @dataclass
 class F64RenderState:
@@ -170,30 +191,99 @@ class F64RenderState:
   env_color: F64Color|None = None
   ck: tuple[float, float, float, float, float, float, float, float]|None = None
   convert: tuple[float, float, float, float, float, float]|None = None
-  cc: np.ndarray|None = None
+  cc: tuple[float, float, float, float, float, float, float, float, float, float, float, float, float, float, float, float]|None = None
   alpha_clip: float|None = None
   render_mode: F64Rendermode|None = None
+  flags: int = 0
+  geo_mode: int = 0
+  othermode_l: int = 0
+  othermode_h: int = 0
+  prim_depth: tuple[float, float] = None
+  tex_size: tuple[int, int] = None
+  mip_count: int = None
+
+  cached_values: np.ndarray|None = None
+  cached_mask: np.ndarray|None = None
 
   def __post_init__(self):
     if self.lights is None: self.lights = [None] * 8
     if self.tex_confs is None: self.tex_confs = [None] * 8
 
-  def copy(self):
-    new = copy.copy(self)
-    new.lights = copy.copy(self.lights)
-    return new
+  def save_cache(self):
+    self.cached_values = self.np_array(False)
+    self.cached_mask = self.np_array(True)
 
-  def set_if_not_none(self, other: "F64RenderState"): # TODO: optimize
-    for light, other_light in zip(self.lights, other.lights):
-      if other_light is None: continue
-      light.color = other_light.color
-      if other_light.direction is not None: light.direction = other_light.direction
+  def np_array(self, make_mask: bool=False):
+    if make_mask:
+      def mask(value: None|object, size: int=1, mask_value: int=0xFFFFFFFF):
+        return (mask_value if value is None else 0,) * size
+      def mask_single(value: None|object, mask_value: int=0xFFFFFFFF):
+        return mask_value if value is None else 0
+      ubo_struct = UNIFORM_BUFFER_MASK_STRUCT
+    else:
+      def mask(value: None|object, size: int=1, _mask_value=0):
+        if value is None: return (0,) * size
+        return value
+      def mask_single(value: None|object, _mask_value=0):
+        return 0 if value is None else value
+      ubo_struct = UNIFORM_BUFFER_STRUCT
+
+    light_data = []
+    for l in self.lights:
+      if l is None: light_data.extend(mask(None, 7))
+      else:
+        light_data.extend(mask(l.color, 4))
+        light_data.extend(mask(l.direction, 3))
+    tex_data = []
+    for t in self.tex_confs:
+      if t is None: tex_data.extend(mask(None, 9))
+      else: tex_data.extend(mask(t.values, 9))
+    
+    blender, flags = None, self.flags
+    if self.render_mode is not None: 
+      blender = self.render_mode.blender
+      flags |= self.render_mode.flags
+
+    ck = self.ck
+    if ck is None:
+      ck = (0,) * 9
+
+    return np.frombuffer(
+      ubo_struct.pack(
+        *tex_data,
+        *light_data,
+        *mask(blender, 8),
+        *mask(self.cc, 16),
+        mask_single(self.geo_mode),
+        mask_single(self.othermode_l),
+        mask_single(self.othermode_h),
+        mask_single(flags),
+        *mask(self.prim_color, 4),
+        *mask(self.prim_lod, 2),
+        *mask(self.prim_depth, 2),
+        *mask(self.env_color, 4),
+        *mask(self.ambient_color, 4),
+        *mask(ck[:3], 3),
+        mask_single(self.alpha_clip),
+        *mask(ck[3:6], 3),
+        mask_single(self.light_count),
+        *mask(ck[6:9], 3),
+        mask_single(self.mip_count),
+        *mask(self.convert, 6),
+        *mask(self.tex_size, 2),
+      ),
+      dtype=np.uint8
+    )
+  
+  def set_values_from_cache(self, other: "F64RenderState"):
+    self.cached_values = (self.cached_values & other.cached_mask) | other.cached_values
     for i, other_conf in enumerate(other.tex_confs):
       if other_conf is not None: self.tex_confs[i] = other_conf
 
-    for attr in NON_SPECIAL_KEYS:
-      value = getattr(other, attr, None)
-      if value is not None: setattr(self, attr, value)
+  def copy(self):
+    new = copy.copy(self)
+    new.cached_values = new.cached_values.copy()
+    return new
 
   def set_from_rendermode(self, rendermode: RenderMode):
     self.render_mode = F64Rendermode(get_blender_settings(rendermode.blend_cycle1, rendermode.blend_cycle2),  depth_write=rendermode.z_upd)
@@ -206,20 +296,13 @@ class F64RenderState:
       self.render_mode.blend = "ALPHA"
       self.render_mode.flags |= DRAW_FLAG_ALPHA_BLEND
 
-NON_SPECIAL_KEYS = F64RenderState.__annotations__.keys() - ["lights", "tex_confs"]
 
 @dataclass
 class F64Material:
   state: F64RenderState = dataclasses.field(default_factory=F64RenderState)
-  flags: int = 0
   cull: str = 'NONE'
-  geo_mode: int = 0
-  othermode_l: int = 0
-  othermode_h: int = 0
-  prim_depth: tuple[float, float] = (0, 0)
-  tex_size: tuple[int, int] = (0, 0)
-  mip_count: int = 0
   layer: int|str|None = None
+
 
 def quantize_direction(direction):
   return tuple(quantize(x, 8, -1, 1) for x in direction)
@@ -282,10 +365,10 @@ def f64_material_parse(f3d_mat: "F3DMaterialProperty", always_set: bool, set_lig
   uv_basis = None
   if use_tex0 and use_tex1: uv_basis = int(f3d_mat.uv_basis.removeprefix("TEXEL"))
   elif use_tex0 or use_tex1: uv_basis = 0 if use_tex0 else 1
-  if uv_basis is not None: f64mat.tex_size = tuple(getattr(f3d_mat, f"tex{uv_basis}").get_tex_size())
+  if uv_basis is not None: state.tex_size = tuple(getattr(f3d_mat, f"tex{uv_basis}").get_tex_size())
 
   if cc_uses["Texture 0"] and cc_uses["Texture 1"]: f64mat.mip_count = f3d_mat.rdp_settings.num_textures_mipmapped - 1
-  f64mat.prim_depth = (rdp.prim_depth.z, rdp.prim_depth.dz)
+  state.prim_depth = (rdp.prim_depth.z, rdp.prim_depth.dz)
   
   from fast64_internal.f3d.f3d_gbi import get_F3D_GBI
   from fast64_internal.f3d.f3d_material import get_textlut_mode
@@ -303,7 +386,8 @@ def f64_material_parse(f3d_mat: "F3DMaterialProperty", always_set: bool, set_lig
   if rdp.g_mdsft_cycletype == 'G_CYC_COPY':
     othermode_h ^= gbi.G_TF_BILERP | gbi.G_TF_AVERAGE
   othermode_h |= getattr(gbi, get_textlut_mode(f3d_mat))
-  f64mat.geo_mode, f64mat.othermode_l, f64mat.othermode_h = geo_mode, othermode_l, othermode_h
+  state.geo_mode, state.othermode_l, state.othermode_h = geo_mode, othermode_l, othermode_h
+  state.save_cache()
 
   game_mode = bpy.context.scene.gameEditorMode
   f64mat.layer = getattr(f3d_mat.draw_layer, game_mode.lower(), None)
@@ -319,4 +403,6 @@ def node_material_parse(mat: bpy.types.Material) -> F64Material:
     if bsdf:
       color = quantize_srgb(bsdf.inputs['Base Color'].default_value)
 
-  return F64Material(F64RenderState(prim_color=color, cc=SOLID_CC))
+  state = F64RenderState(prim_color=color, cc=SOLID_CC)
+  state.save_cache()
+  return F64Material(state)
