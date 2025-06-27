@@ -183,7 +183,7 @@ class F64Light:
 
 @dataclass
 class F64RenderState:
-  tex_confs: list[F64Texture] = None
+  tex_confs: list[F64Texture | None] = None
   lights: list[F64Light|None] = None
   ambient_color: F64Color|None = None
   light_count: int|None = None
