@@ -77,6 +77,11 @@ CC2_A = { # TEX0 and TEX1 are swapped
   "PRIM_LOD_FRAC": 9,
 }
 
+SOLID_CC=(0, 0, 0, 5, 
+          0, 0, 0, 5,
+          0, 0, 0, 5, 
+          0, 0, 0, 5)
+
 # Fetches CC settings from a given fast64-material
 def get_cc_settings(f3d_mat) -> np.ndarray:
   c0 = f3d_mat.combiner1
