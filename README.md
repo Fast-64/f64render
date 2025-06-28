@@ -7,3 +7,9 @@ It for now performs on par with the EEVEE-nodes-based rendering present in Fast6
 It also offers increased accuracy, with for example blender cycles emulation which is not possible with EEVEE.
 
 It is currently in development but very usable already!
+
+## Development
+
+### Formatting
+
+This repo uses [the same formatting policy as fast64, using black version 23](https://github.com/Fast-64/fast64/blob/main/README.md#formatting).
