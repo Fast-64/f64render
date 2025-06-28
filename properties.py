@@ -143,12 +143,32 @@ class F64RenderSettings(bpy.types.PropertyGroup):
     )
     sources_tab: bpy.props.BoolProperty(name="Default Sources")
     default_prim_color: bpy.props.FloatVectorProperty(
-        description="Primitive Color", default=(1, 1, 1, 1), subtype="COLOR", size=4, min=0, max=1
+        description="Primitive Color",
+        default=(1, 1, 1, 1),
+        subtype="COLOR",
+        size=4,
+        min=0,
+        max=1,
     )
-    default_lod_frac: bpy.props.FloatProperty(description="Prim LOD Frac", min=0, max=1, step=1)
-    default_lod_min: bpy.props.FloatProperty(description="Min LOD Ratio", min=0, max=1, step=1)
+    default_lod_frac: bpy.props.FloatProperty(
+        description="Prim LOD Frac",
+        min=0,
+        max=1,
+        step=1,
+    )
+    default_lod_min: bpy.props.FloatProperty(
+        description="Min LOD Ratio",
+        min=0,
+        max=1,
+        step=1,
+    )
     default_env_color: bpy.props.FloatVectorProperty(
-        description="Enviroment Color", default=(0.5, 0.5, 0.5, 0.5), subtype="COLOR", size=4, min=0, max=1
+        description="Enviroment Color",
+        default=(0.5, 0.5, 0.5, 0.5),
+        subtype="COLOR",
+        size=4,
+        min=0,
+        max=1,
     )
 
     chroma_tab: bpy.props.BoolProperty(name="Chroma Key")

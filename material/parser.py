@@ -188,7 +188,7 @@ LIGHT_STRUCT = "4f 3f 4x"  # color, direction, padding
 TILE_STRUCT = "2f 2f 2f 2f i 12x"  # mask, shift, low, high, flags, padding
 
 UNIFORM_BUFFER_STRUCT = struct.Struct(
-    (TILE_STRUCT * 8) + (LIGHT_STRUCT * 8) + "8i"  # texture configurations  # lights  # blender
+    (TILE_STRUCT * 8) + (LIGHT_STRUCT * 8) + "8i"  # texture configurations, lights, blender
     "16i"  # color-combiner settings
     "i i i i"  # geoMode, other-low, other-high, flags
     "4f 4f 4f 4f"  # prim, prim_lod, prim-depth, env, ambient
