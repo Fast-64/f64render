@@ -1,14 +1,25 @@
 // NOTE: this file is included by blender via 'shader_info.typedef_source(...)'
 
+struct Light
+{
+  vec4 color;
+  vec3 dir;
+};
+
+struct TileConf
+{
+  vec2 mask;  // clamped if < 0, mask = abs(mask)
+  vec2 shift;
+  vec2 low;
+  vec2 high;  // if negative, mirrored, high = abs(high)
+  uint flags; // TODO: correct impl of this would be to process textures ahead of time, but this has to be done in fast64 first
+};
+
 struct UBO_Material
 {
+  TileConf texConfs[8]; // TODO: should these two be part of separate uniform buffers?
+  Light lights[8];
   ivec4 blender[2];
-
-  //Tile settings: xy = TEX0, zw = TEX1
-  vec4 mask; // clamped if < 0, mask = abs(mask)
-  vec4 shift;
-  vec4 low;
-  vec4 high; // if negative, mirrored, high = abs(high)
 
   // color-combiner
   ivec4 cc0Color;
@@ -17,20 +28,24 @@ struct UBO_Material
   ivec4 cc1Alpha;
 
   ivec4 modes; // geo, other-low, other-high, flags
-  vec4 lightColor[2];
-  vec4 lightDir[2]; // [0].w is alpha clip
-  vec4 prim_color;
+
+  vec4 primColor;
+  vec2 primLod; // x is frac, y is min
+  vec2 primDepth;
   vec4 env;
   vec4 ambientColor;
-  vec4 ck_center;
-  vec4 ck_scale;
-  vec4 primLodDepth;
-  vec4 k_0123;
-  vec2 k_45;  
+  vec3 ckCenter;
+  float alphaClip;
+  vec3 ckScale;
+  uint numLights;
+  vec3 ckWidth;
+  int mipCount;
+  vec4 k0123;
+  vec2 k45;
+  uvec2 texSize;
 };
 
 #define GEO_MODE     material.modes.x
 #define OTHER_MODE_L material.modes.y
 #define OTHER_MODE_H material.modes.z
 #define DRAW_FLAGS   material.modes.w
-#define ALPHA_CLIP   material.lightDir[0].w

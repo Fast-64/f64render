@@ -15,7 +15,7 @@ bl_info = {
     "name" : "F64renderer",
     "author" : "Max Bebök",
     "description" : "",
-    "blender" : (4, 2, 0),
+    "blender" : (3, 2, 0),
     "version" : (0, 0, 1),
     "location" : "",
     "warning" : "",
