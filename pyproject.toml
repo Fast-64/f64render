@@ -1,0 +1,6 @@
+[tool.black]
+required-version = '23'
+line-length = 120
+target-version = [
+    'py310', # used by Blender 3.2
+]
