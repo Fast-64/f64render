@@ -441,7 +441,7 @@ def f64_material_parse(f3d_mat: "F3DMaterialProperty", always_set: bool, set_lig
         state.tex_size = tuple(getattr(f3d_mat, f"tex{uv_basis}").get_tex_size())
 
     if cc_uses["Texture 0"] and cc_uses["Texture 1"]:
-        f64mat.mip_count = f3d_mat.rdp_settings.num_textures_mipmapped - 1
+        state.mip_count = f3d_mat.rdp_settings.num_textures_mipmapped - 1
     state.prim_depth = (rdp.prim_depth.z, rdp.prim_depth.dz)
 
     from fast64_internal.f3d.f3d_gbi import get_F3D_GBI

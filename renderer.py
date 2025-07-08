@@ -220,7 +220,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
                 world_lighting = update.id.fast64.renderSettings.useWorldSpaceLighting
                 if world_lighting != F64_GLOBALS.world_lighting:
                     F64_GLOBALS.world_lighting = world_lighting
-                    F64_GLOBALS.rebuid_shaders = True
+                    F64_GLOBALS.rebuild_shaders = True
 
                 F64_GLOBALS.clear_areas()  # reset area lookup to refresh initial render state, is this the best approach?
             if isinstance(update.id, bpy.types.Material) and update.id in F64_GLOBALS.materials_cache:
@@ -280,8 +280,8 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
         projection_matrix, view_matrix = context.region_data.perspective_matrix, context.region_data.view_matrix
         self.use_atomic_rendering = bpy.app.version >= (4, 1, 0) and f64render_rs.use_atomic_rendering
 
-        if F64_GLOBALS.rebuid_shaders or self.shader is None:
-            F64_GLOBALS.rebuid_shaders = False
+        if F64_GLOBALS.rebuild_shaders or self.shader is None:
+            F64_GLOBALS.rebuild_shaders = False
             self.init_shader(context.scene)
 
         if self.use_atomic_rendering:
