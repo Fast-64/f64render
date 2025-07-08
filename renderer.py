@@ -43,8 +43,8 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
     bl_label = "Fast64 Renderer"
     bl_use_preview = False
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         addon_set_fast64_path()
 
         self.shader = None
