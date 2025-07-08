@@ -11,7 +11,7 @@ class F64Globals:
         self.obj_lights: dict[str, "F64Light"] = {}
         self.sm64_area_lookup: dict | None = None
         self.oot_room_lookup: dict | None = None  # oot
-        self.rebuid_shaders = True
+        self.rebuild_shaders = True
         self.current_ucode = self.world_lighting = self.current_gamemode = None
 
     def clear_areas(self):

@@ -130,7 +130,7 @@ def update_all_materials(_scene, _context):
 
 
 def rebuild_shaders(_scene, _context):
-    F64_GLOBALS.rebuid_shaders = True
+    F64_GLOBALS.rebuild_shaders = True
 
 
 class F64RenderSettings(bpy.types.PropertyGroup):
