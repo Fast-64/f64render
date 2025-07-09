@@ -94,39 +94,37 @@ void computeLOD(
     const bool detail = textDetail == G_TD_DETAIL;
     const bool clam = textDetail == G_TD_CLAMP;
 
-    uint tileOffset = 0;
-
     const vec2 dfd = max(dx, dy);
     const float maxDist = max(dfd.x, dfd.y);
 
     const uint mip_base = uint(floor(log2(maxDist)));
     // TODO: should this value be scaled by clipping planes?
-    const bool distant0 = perspectiveOverflow || maxDist >= 16384.0;
+    const bool distant = perspectiveOverflow || maxDist >= 16384.0;
     const bool aboveCount = mip_base >= material.mipCount;
-    lodFrac = float(distant0 || (aboveCount && clam));
-    const bool distant = distant0 || aboveCount;
+    const bool maxDistant = distant || aboveCount;
     const bool magnify = maxDist < 1.0;
 
-    if (!distant0 && maxDist < 1.0) { // magnification
-        const float detailFrac = max(minLod, maxDist) - float(sharpen); 
-        lodFrac = mix(float(distant), detailFrac, float(!clam));
-    } else if (!distant || !clam) {
-        lodFrac = maxDist / pow(2, max(mip_base, 0)) - 1.0;
-        lodFrac = max(lodFrac, material.primLod.y);
-        tileOffset = mip_base;
-    }
+    const float detailFrac = max(minLod, maxDist) - float(sharpen); 
+    const float magnifedFrac = mix(float(maxDistant), detailFrac, float(!clam));
+    const float distantFrac = float(distant || (aboveCount && clam));
+    const float notClampedFrac = max(maxDist / pow(2, max(mip_base, 0)) - 1.0, material.primLod.y);
+
+    const float notMagnifedFrac = mix(distantFrac, notClampedFrac, !maxDistant || !clam);
+    lodFrac = mix(notMagnifedFrac, magnifedFrac, float(!distant && magnify));
+
+    uint tileOffset = mip_base * int(!(maxDistant && clam));
 
     if (textLOD) {
-        tileOffset = distant ? material.mipCount : tileOffset;
+        tileOffset = maxDistant ? material.mipCount : tileOffset;
 
         if (detail) {
-            tileIndex1 = (tileIndex0 + tileOffset + (int(!(distant || magnify)) + 1)) & 7;
+            tileIndex1 = (tileIndex0 + tileOffset + (int(!(maxDistant || magnify)) + 1)) & 7;
             tileIndex0 = (tileIndex0 + tileOffset + int(!magnify)) & 7;
         } else {
             tileIndex0 = (tileIndex0 + tileOffset) & 7;
             tileIndex1 = tileIndex0;
-            if (!distant && (sharpen || !magnify))
-                tileIndex1 = (tileIndex1 + 1) & 7; // Use next mip level
+            if (!maxDistant && (sharpen || !magnify))
+                tileIndex1 = (tileIndex1 + 1) & 7;
         }
     }
 }
