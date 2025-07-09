@@ -97,22 +97,22 @@ void computeLOD(
     const vec2 dfd = max(dx, dy);
     const float maxDist = max(dfd.x, dfd.y);
 
-    const uint mip_base = uint(floor(log2(maxDist)));
+    const uint mipBase = uint(floor(log2(maxDist)));
     // TODO: should this value be scaled by clipping planes?
     const bool distant = perspectiveOverflow || maxDist >= 16384.0;
-    const bool aboveCount = mip_base >= material.mipCount;
+    const bool aboveCount = mipBase >= material.mipCount;
     const bool maxDistant = distant || aboveCount;
     const bool magnify = maxDist < 1.0;
 
     const float detailFrac = max(minLod, maxDist) - float(sharpen); 
     const float magnifedFrac = mix(float(maxDistant), detailFrac, float(!clam));
     const float distantFrac = float(distant || (aboveCount && clam));
-    const float notClampedFrac = max(maxDist / pow(2, max(mip_base, 0)) - 1.0, material.primLod.y);
+    const float notClampedFrac = max(maxDist / pow(2, max(mipBase, 0)) - 1.0, material.primLod.y);
 
     const float notMagnifedFrac = mix(distantFrac, notClampedFrac, !maxDistant || !clam);
     lodFrac = mix(notMagnifedFrac, magnifedFrac, float(!distant && magnify));
 
-    uint tileOffset = mip_base * int(!(maxDistant && clam));
+    uint tileOffset = mipBase * int(!(maxDistant && clam));
 
     if (textLOD) {
         tileOffset = maxDistant ? material.mipCount : tileOffset;
