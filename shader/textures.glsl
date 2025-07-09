@@ -92,6 +92,7 @@ void computeLOD(
     const uint textDetail = textDetail();
     const bool sharpen = textDetail == G_TD_SHARPEN;
     const bool detail = textDetail == G_TD_DETAIL;
+    const bool clam = textDetail == G_TD_CLAMP;
 
     uint tileOffset = 0;
 
@@ -102,14 +103,14 @@ void computeLOD(
     // TODO: should this value be scaled by clipping planes?
     const bool distant0 = perspectiveOverflow || maxDist >= 16384.0;
     const bool aboveCount = mip_base >= material.mipCount;
-    lodFrac = float(distant0 || (aboveCount && textDetail == G_TD_CLAMP));
+    lodFrac = float(distant0 || (aboveCount && clam));
     const bool distant = distant0 || aboveCount;
     const bool magnify = maxDist < 1.0;
 
     if (!distant0 && maxDist < 1.0) { // magnification
         const float detailFrac = max(minLod, maxDist) - float(sharpen); 
-        lodFrac = mix(float(distant), detailFrac, float(textDetail != 0));
-    } else if (!distant || textDetail != G_TD_CLAMP) {
+        lodFrac = mix(float(distant), detailFrac, float(!clam));
+    } else if (!distant || !clam) {
         lodFrac = maxDist / pow(2, max(mip_base, 0)) - 1.0;
         lodFrac = max(lodFrac, material.primLod.y);
         tileOffset = mip_base;
