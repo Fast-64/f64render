@@ -95,10 +95,10 @@ void computeLOD(
     const bool clam = textDetail == G_TD_CLAMP;
 
     const vec2 dfd = max(dx, dy);
+    // TODO: should this value be scaled by clipping planes?
     const float maxDist = max(dfd.x, dfd.y);
 
     const uint mipBase = uint(floor(log2(maxDist)));
-    // TODO: should this value be scaled by clipping planes?
     const bool distant = perspectiveOverflow || maxDist >= 16384.0;
     const bool aboveCount = mipBase >= material.mipCount;
     const bool maxDistant = distant || aboveCount;
