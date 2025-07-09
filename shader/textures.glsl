@@ -112,10 +112,8 @@ void computeLOD(
     const float notMagnifedFrac = mix(distantFrac, notClampedFrac, !maxDistant || !clam);
     lodFrac = mix(notMagnifedFrac, magnifedFrac, float(!distant && magnify));
 
-    uint tileOffset = mipBase * int(!(maxDistant && clam));
-
     if (textLOD) {
-        tileOffset = maxDistant ? material.mipCount : tileOffset;
+        const uint tileOffset = maxDistant ? material.mipCount : (mipBase * int(!(maxDistant && clam)));
 
         if (detail) {
             tileIndex1 = (tileIndex0 + tileOffset + (int(!(maxDistant || magnify)) + 1)) & 7;
