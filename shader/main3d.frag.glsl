@@ -155,7 +155,7 @@ void main()
   uint tex0Index = 0;
   uint tex1Index = 1;
   float lodFraction = 0.0;
-  computeLOD(tex0Index, tex1Index, material.primLod.y, dx, dy, false, lodFraction);
+  computeLOD(tex0Index, tex1Index, textLOD(), textDetail(), material.primLod.y, dx, dy, false, lodFraction);
 
   vec4 texData0 = sampleIndex(tex0Index, inputUV, texFilter);
   vec4 texData1 = sampleIndex(tex1Index, inputUV, texFilter);

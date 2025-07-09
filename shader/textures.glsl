@@ -82,14 +82,14 @@ vec4 sampleIndex(in const uint textureIndex, in const vec2 uvCoord, in const uin
 void computeLOD(
     inout uint tileIndex0,
     inout uint tileIndex1,
-    float minLod,
-    vec2 dx,
-    vec2 dy,
-    bool perspectiveOverflow, // this should be possible from what I've read in parallel-rdp, can always be removed
+    const bool textLOD,
+    const uint textDetail,
+    const float minLod,
+    const vec2 dx,
+    const vec2 dy,
+    const bool perspectiveOverflow, // this should be possible from what I've read in parallel-rdp, can always be removed
     out float lodFrac
 ) {
-    const bool textLOD = bool(textLOD());
-    const uint textDetail = textDetail();
     const bool sharpen = textDetail == G_TD_SHARPEN;
     const bool detail = textDetail == G_TD_DETAIL;
     const bool clam = textDetail == G_TD_CLAMP;

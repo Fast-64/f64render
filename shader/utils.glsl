@@ -26,7 +26,7 @@ vec3 linearToGamma(in vec3 color) {
 #define cycleType() (OTHER_MODE_H & (3 << G_MDSFT_CYCLETYPE))
 #define texFilter() (OTHER_MODE_H & (3 << G_MDSFT_TEXTFILT))
 #define textPersp() (OTHER_MODE_H & (1 << G_MDSFT_TEXTPERSP))
-#define textLOD()   (OTHER_MODE_H & (1 << G_MDSFT_TEXTLOD))
+#define textLOD()   (bool(OTHER_MODE_H & (1 << G_MDSFT_TEXTLOD)))
 #define textDetail()(OTHER_MODE_H & (3 << G_MDSFT_TEXTDETAIL))
 
 #define boolSelect(cond, a, b) (bool(mix(a, b, cond)))
