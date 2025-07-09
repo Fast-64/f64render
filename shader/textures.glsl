@@ -79,44 +79,71 @@ vec4 sampleIndex(in const uint textureIndex, in const vec2 uvCoord, in const uin
   }
 }
 
-float computeLOD(inout uint tileIndex0, inout uint tileIndex1) {
-  // https://github.com/rt64/rt64/blob/0ca92eeb6c2f58ce3581c65f87f7261b8ac0fea0/src/shaders/TextureSampler.hlsli#L18
-  if (textLOD() == G_TL_TILE)
-    return 1.0f;
-  const uint texDetail = textDetail();
-  const bool lodSharpen = texDetail == G_TD_SHARPEN;
-  const bool lodDetail = texDetail == G_TD_DETAIL;
-  const bool lodSharpDetail = lodSharpen || lodDetail;
+// #define EMULATE_PERSPECTIVE_OVERFLOW 1
 
-#ifdef GL_ARB_derivative_control
-  const vec2 dfd = abs(vec2(dFdxCoarse(inputUV.x), dFdyCoarse(inputUV.y)));
-#else
-  const vec2 dfd = abs(vec2(dFdx(inputUV.x), dFdy(inputUV.y)));
+void computeLOD(
+    inout uint tileIndex0,
+    inout uint tileIndex1,
+    float minLod,
+    vec2 dx,
+    vec2 dy,
+    bool perspective_overflow,
+    out float lodFrac
+) {
+    const bool textLOD = bool(textLOD());
+    const uint textDetail = textDetail();
+    const bool sharpen = textDetail == G_TD_SHARPEN;
+    const bool detail = textDetail == G_TD_DETAIL;
+
+    bool magnify = false;
+    bool distant = false;
+
+    uint tile_offset = 0;
+
+#ifdef EMULATE_PERSPECTIVE_OVERFLOW // this should be possible from what I've read in parallel-rdp, can always be removed
+    if (perspective_overflow) {
+        distant = true;
+        lodFrac = 1.0;
+    } else {
 #endif
-  float maxDst = max(dfd.x, dfd.y);
+        vec2 dfd = max(dx, dy);
+        float max_d = max(dfd.x, dfd.y);
+        // TODO: should this value be scaled by clipping planes?
+        if (max_d >= 16384.0) { // max delta very large
+            distant = true;
+            lodFrac = 1.0;
+        } else if (max_d < 1.0) { // magnification
+            magnify = true;
+            distant = material.mipCount == 0;
+            const float detailFrac = max(minLod, max_d) - float(sharpen); 
+            lodFrac = bool(textDetail) ? detailFrac : float(distant);
+        } else {
+            uint mip_base = uint(floor(log2(max_d)));
+            distant = mip_base >= material.mipCount;
 
-  if (lodSharpDetail) 
-    maxDst = max(maxDst, material.primLod.y);
+            if (distant && textDetail == G_TD_CLAMP) {
+                lodFrac = 1.0;
+            } else {
+                lodFrac = max_d / pow(2, max(mip_base, 0)) - 1.0;
+                lodFrac = max(lodFrac, material.primLod.y);
+                tile_offset = mip_base;
+            }
+        }
+#ifdef EMULATE_PERSPECTIVE_OVERFLOW
+    }
+#endif
 
-  int tileBase = int(floor(log2(maxDst)));
-  float lodFraction = maxDst / pow(2, max(tileBase, 0)) - 1.0;
+    if (textLOD) {
+        tile_offset = distant ? material.mipCount : tile_offset;
 
-  if (lodSharpen && maxDst < 1.0)
-    lodFraction = maxDst - 1.0;
-
-  if (lodDetail) {
-    if (lodFraction < 0.0)
-      lodFraction = maxDst;
-    tileBase += 1;
-  } else if (tileBase >= material.mipCount)
-    lodFraction = 1.0;
-
-  if (lodSharpDetail) 
-    tileBase = max(tileBase, 0);
-  else 
-    lodFraction = max(lodFraction, 0.0);
-
-  tileIndex0 = clamp(tileBase, 0, material.mipCount);
-  tileIndex1 = clamp(tileBase + 1, 0, material.mipCount);
-  return lodFraction;
+        if (detail) {
+            tileIndex1 = (tileIndex0 + tile_offset + (int(!(distant || magnify)) + 1)) & 7;
+            tileIndex0 = (tileIndex0 + tile_offset + int(!magnify)) & 7;
+        } else {
+            tileIndex0 = (tileIndex0 + tile_offset) & 7;
+            tileIndex1 = tileIndex0;
+            if (!distant && (sharpen || !magnify))
+                tileIndex1 = (tileIndex1 + 1) & 7; // Use next mip level
+        }
+    }
 }

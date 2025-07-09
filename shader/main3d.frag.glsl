@@ -144,9 +144,18 @@ void main()
 
   vec4 ccShade = geoModeSelect(G_SHADE_SMOOTH, cc_shade_flat, cc_shade);
 
+#ifdef GL_ARB_derivative_control
+  const vec2 dx = abs(vec2(dFdxCoarse(inputUV.x), dFdyCoarse(inputUV.x)));
+  const vec2 dy = abs(vec2(dFdxCoarse(inputUV.y), dFdyCoarse(inputUV.y)));
+#else
+  const vec2 dx = abs(vec2(dFdx(inputUV.x), dFdy(inputUV.x)));
+  const vec2 dy = abs(vec2(dFdx(inputUV.y), dFdy(inputUV.y)));
+#endif
+
   uint tex0Index = 0;
   uint tex1Index = 1;
-  const float lodFraction = computeLOD(tex0Index, tex1Index);
+  float lodFraction = 0.0;
+  computeLOD(tex0Index, tex1Index, material.primLod.y, dx, dy, false, lodFraction);
 
   vec4 texData0 = sampleIndex(tex0Index, inputUV, texFilter);
   vec4 texData1 = sampleIndex(tex1Index, inputUV, texFilter);
