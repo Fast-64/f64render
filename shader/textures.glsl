@@ -87,7 +87,7 @@ void computeLOD(
     float minLod,
     vec2 dx,
     vec2 dy,
-    bool perspective_overflow,
+    bool perspectiveOverflow,
     out float lodFrac
 ) {
     const bool textLOD = bool(textLOD());
@@ -98,35 +98,35 @@ void computeLOD(
     bool magnify = false;
     bool distant = false;
 
-    uint tile_offset = 0;
+    uint tileOffset = 0;
 
 #ifdef EMULATE_PERSPECTIVE_OVERFLOW // this should be possible from what I've read in parallel-rdp, can always be removed
-    if (perspective_overflow) {
+    if (perspectiveOverflow) {
         distant = true;
         lodFrac = 1.0;
     } else {
 #endif
         vec2 dfd = max(dx, dy);
-        float max_d = max(dfd.x, dfd.y);
+        float maxDist = max(dfd.x, dfd.y);
         // TODO: should this value be scaled by clipping planes?
-        if (max_d >= 16384.0) { // max delta very large
+        if (maxDist >= 16384.0) { // max delta very large
             distant = true;
             lodFrac = 1.0;
-        } else if (max_d < 1.0) { // magnification
+        } else if (maxDist < 1.0) { // magnification
             magnify = true;
             distant = material.mipCount == 0;
-            const float detailFrac = max(minLod, max_d) - float(sharpen); 
+            const float detailFrac = max(minLod, maxDist) - float(sharpen); 
             lodFrac = bool(textDetail) ? detailFrac : float(distant);
         } else {
-            uint mip_base = uint(floor(log2(max_d)));
+            uint mip_base = uint(floor(log2(maxDist)));
             distant = mip_base >= material.mipCount;
 
             if (distant && textDetail == G_TD_CLAMP) {
                 lodFrac = 1.0;
             } else {
-                lodFrac = max_d / pow(2, max(mip_base, 0)) - 1.0;
+                lodFrac = maxDist / pow(2, max(mip_base, 0)) - 1.0;
                 lodFrac = max(lodFrac, material.primLod.y);
-                tile_offset = mip_base;
+                tileOffset = mip_base;
             }
         }
 #ifdef EMULATE_PERSPECTIVE_OVERFLOW
@@ -134,13 +134,13 @@ void computeLOD(
 #endif
 
     if (textLOD) {
-        tile_offset = distant ? material.mipCount : tile_offset;
+        tileOffset = distant ? material.mipCount : tileOffset;
 
         if (detail) {
-            tileIndex1 = (tileIndex0 + tile_offset + (int(!(distant || magnify)) + 1)) & 7;
-            tileIndex0 = (tileIndex0 + tile_offset + int(!magnify)) & 7;
+            tileIndex1 = (tileIndex0 + tileOffset + (int(!(distant || magnify)) + 1)) & 7;
+            tileIndex0 = (tileIndex0 + tileOffset + int(!magnify)) & 7;
         } else {
-            tileIndex0 = (tileIndex0 + tile_offset) & 7;
+            tileIndex0 = (tileIndex0 + tileOffset) & 7;
             tileIndex1 = tileIndex0;
             if (!distant && (sharpen || !magnify))
                 tileIndex1 = (tileIndex1 + 1) & 7; // Use next mip level
