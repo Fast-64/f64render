@@ -79,15 +79,13 @@ vec4 sampleIndex(in const uint textureIndex, in const vec2 uvCoord, in const uin
   }
 }
 
-// #define EMULATE_PERSPECTIVE_OVERFLOW 1
-
 void computeLOD(
     inout uint tileIndex0,
     inout uint tileIndex1,
     float minLod,
     vec2 dx,
     vec2 dy,
-    bool perspectiveOverflow,
+    bool perspectiveOverflow, // this should be possible from what I've read in parallel-rdp, can always be removed
     out float lodFrac
 ) {
     const bool textLOD = bool(textLOD());
@@ -95,43 +93,27 @@ void computeLOD(
     const bool sharpen = textDetail == G_TD_SHARPEN;
     const bool detail = textDetail == G_TD_DETAIL;
 
-    bool magnify = false;
-    bool distant = false;
-
     uint tileOffset = 0;
 
-#ifdef EMULATE_PERSPECTIVE_OVERFLOW // this should be possible from what I've read in parallel-rdp, can always be removed
-    if (perspectiveOverflow) {
-        distant = true;
-        lodFrac = 1.0;
-    } else {
-#endif
-        vec2 dfd = max(dx, dy);
-        float maxDist = max(dfd.x, dfd.y);
-        // TODO: should this value be scaled by clipping planes?
-        if (maxDist >= 16384.0) { // max delta very large
-            distant = true;
-            lodFrac = 1.0;
-        } else if (maxDist < 1.0) { // magnification
-            magnify = true;
-            distant = material.mipCount == 0;
-            const float detailFrac = max(minLod, maxDist) - float(sharpen); 
-            lodFrac = bool(textDetail) ? detailFrac : float(distant);
-        } else {
-            uint mip_base = uint(floor(log2(maxDist)));
-            distant = mip_base >= material.mipCount;
+    const vec2 dfd = max(dx, dy);
+    const float maxDist = max(dfd.x, dfd.y);
 
-            if (distant && textDetail == G_TD_CLAMP) {
-                lodFrac = 1.0;
-            } else {
-                lodFrac = maxDist / pow(2, max(mip_base, 0)) - 1.0;
-                lodFrac = max(lodFrac, material.primLod.y);
-                tileOffset = mip_base;
-            }
-        }
-#ifdef EMULATE_PERSPECTIVE_OVERFLOW
+    const uint mip_base = uint(floor(log2(maxDist)));
+    // TODO: should this value be scaled by clipping planes?
+    const bool distant0 = perspectiveOverflow || maxDist >= 16384.0;
+    const bool aboveCount = mip_base >= material.mipCount;
+    lodFrac = float(distant0 || (aboveCount && textDetail == G_TD_CLAMP));
+    const bool distant = distant0 || aboveCount;
+    const bool magnify = maxDist < 1.0;
+
+    if (!distant0 && maxDist < 1.0) { // magnification
+        const float detailFrac = max(minLod, maxDist) - float(sharpen); 
+        lodFrac = mix(float(distant), detailFrac, float(textDetail != 0));
+    } else if (!distant || textDetail != G_TD_CLAMP) {
+        lodFrac = maxDist / pow(2, max(mip_base, 0)) - 1.0;
+        lodFrac = max(lodFrac, material.primLod.y);
+        tileOffset = mip_base;
     }
-#endif
 
     if (textLOD) {
         tileOffset = distant ? material.mipCount : tileOffset;
