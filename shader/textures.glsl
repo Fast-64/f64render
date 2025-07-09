@@ -114,15 +114,15 @@ void computeLOD(
 
     if (textLOD) {
         const uint tileOffset = maxDistant ? material.mipCount : (mipBase * int(!(maxDistant && clam)));
-
+        tileIndex0 = tileIndex0 + tileOffset;
+        tileIndex1 = tileIndex0;
         if (detail) {
-            tileIndex1 = (tileIndex0 + tileOffset + (int(!(maxDistant || magnify)) + 1)) & 7;
-            tileIndex0 = (tileIndex0 + tileOffset + int(!magnify)) & 7;
+            tileIndex1 += (int(!(maxDistant || magnify)) + 1);
+            tileIndex0 += int(!magnify);
         } else {
-            tileIndex0 = (tileIndex0 + tileOffset) & 7;
-            tileIndex1 = tileIndex0;
-            if (!maxDistant && (sharpen || !magnify))
-                tileIndex1 = (tileIndex1 + 1) & 7;
+            tileIndex1 += uint(!maxDistant && (sharpen || !magnify));
         }
+        tileIndex0 &= 7;
+        tileIndex1 &= 7;
     }
 }
