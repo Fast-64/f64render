@@ -38,9 +38,9 @@ vec4 sampleSampler(in const sampler2D tex, in const TileConf tileConf, in vec2 u
 
   uvCoord -= tileConf.low;
 
-  const vec2 isClamp      = step(tileConf.mask, vec2(1.0));
-  const vec2 isMirror     = step(tileConf.high, vec2(0.0));
-  const vec2 mask         = abs(tileConf.mask); // if mask == 0, we also have to ignore it
+  const vec2 isClamp      = step(tileConf.mask, vec2(1.0)); // if mask is negated, clamp
+  const vec2 isMirror     = step(tileConf.high, vec2(0.0)); // if high is negated, mirror
+  const vec2 mask         = abs(tileConf.mask);
   const vec2 highMinusLow = abs(tileConf.high) - abs(tileConf.low);
 
   if (texFilter != G_TF_POINT) {
