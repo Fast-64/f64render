@@ -383,7 +383,7 @@ def get_panels():
         "VIEWLAYER_PT_layer_passes",
     }
 
-    include_panels = {"EEVEE_MATERIAL_PT_context_material", "MATERIAL_PT_preview"}
+    include_panels = {"EEVEE_MATERIAL_PT_context_material", "MATERIAL_PT_preview", "DATA_PT_EEVEE_light"}
 
     panels = []
     for panel in bpy.types.Panel.__subclasses__():
