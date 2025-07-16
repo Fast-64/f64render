@@ -69,6 +69,7 @@ def get_scene_render_state(scene: bpy.types.Scene):
         convert=quantize_tuple(f64render_rs.default_convert, 9.0, -1.0, 1.0),
         cc=SOLID_CC,
         tex_confs=([get_tile_conf(getattr(f64render_rs, f"default_tex{i}")) for i in range(0, 8)]),
+        tex_size=(32, 32),
     )
     state.lights[0] = F64Light(
         quantize_srgb(fast64_rs.light0Color, force_alpha=True), quantize_direction(fast64_rs.light0Direction)
