@@ -163,7 +163,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
 
         self.shader = gpu.shader.create_from_info(shader_info)
         self.shader_fallback = gpu.shader.from_builtin(
-            "3D_UNIFORM_COLOR" if bpy.app.version < (4, 1, 0) else "UNIFORM_COLOR"
+            "3D_UNIFORM_COLOR" if bpy.app.version < (3, 4, 0) else "UNIFORM_COLOR"
         )
         self.vbo_format = self.shader.format_calc()
 
