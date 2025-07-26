@@ -461,7 +461,7 @@ def f64_material_parse(f3d_mat: "F3DMaterialProperty", always_set: bool, set_lig
     for i, attr in enumerate(OTHERMODE_H_ATTRS):
         othermode_h |= getattr(gbi, getattr(rdp, attr))
     if rdp.g_mdsft_cycletype == "G_CYC_COPY":
-        othermode_h ^= gbi.G_TF_BILERP | gbi.G_TF_AVERAGE
+        othermode_h &= ~(gbi.G_TF_BILERP | gbi.G_TF_AVERAGE)
     othermode_h |= getattr(gbi, get_textlut_mode(f3d_mat))
     state.geo_mode, state.othermode_l, state.othermode_h = geo_mode, othermode_l, othermode_h
     state.save_cache()
