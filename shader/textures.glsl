@@ -106,7 +106,7 @@ void computeLOD(
     const float detailFrac = max(minLod, maxDist) - float(sharpen); 
     const float magnifedFrac = mix(float(maxDistant), detailFrac, float(!clam));
     const float distantFrac = float(distant || (aboveCount && clam));
-    const float notClampedFrac = max(maxDist / pow(2, max(mipBase, 0)) - 1.0, material.primLod.y);
+    const float notClampedFrac = max(maxDist / pow(2, max(mipBase, 0)) - 1.0, minLod);
 
     const float notMagnifedFrac = mix(distantFrac, notClampedFrac, !maxDistant || !clam);
     lodFrac = mix(notMagnifedFrac, magnifedFrac, float(!distant && magnify));
