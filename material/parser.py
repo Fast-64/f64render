@@ -394,7 +394,7 @@ def f64_material_parse(f3d_mat: "F3DMaterialProperty", always_set: bool, set_lig
         state.cc = get_cc_settings(f3d_mat)
     if always_set or (f3d_mat.set_prim and cc_uses["Primitive"]):
         state.prim_color = quantize_srgb(f3d_mat.prim_color)
-        state.prim_lod = (f3d_mat.prim_lod_frac, f3d_mat.prim_lod_min)
+        state.prim_lod = quantize_tuple((f3d_mat.prim_lod_frac, f3d_mat.prim_lod_min), 8)
     if always_set or (f3d_mat.set_env and cc_uses["Environment"]):
         state.env_color = quantize_srgb(f3d_mat.env_color)
     if always_set or (f3d_mat.set_key and cc_uses["Key"]):  # extra 0 for alignment
