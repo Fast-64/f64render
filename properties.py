@@ -27,7 +27,7 @@ enumCIFormat = [
 def simplified_tex_update(self, context):
     from fast64_internal.f3d.f3d_material import setAutoProp
 
-    tex_size = self.get_tex_size()
+    tex_size = self.tex_size
     if self.tex is not None and self.autoprop:
         setAutoProp(self.S, tex_size[0])
         setAutoProp(self.T, tex_size[1])
@@ -84,14 +84,43 @@ class TextureProperty(PropertyGroup):
     menu: bpy.props.BoolProperty()
     autoprop: bpy.props.BoolProperty(
         name="Autoprop",
-        default=True,
         update=simplified_tex_update,
+        default=True,
     )
 
-    def get_tex_size(self) -> list[int]:
-        if self.tex:
-            return self.tex.size
+    @property
+    def is_ci(self):
+        self.tex_format: str
+        return self.tex_format.startswith("CI")
+
+    @property
+    def is_set(self):
+        return self.tex_set and (self.use_tex_reference or self.tex is not None)
+
+    @property
+    def tlut_mode(self):
+        return f"G_TT_{self.ci_format if self.is_ci else 'NONE'}"
+
+    @property
+    def tex_size(self) -> list[int]:
+        if self.tex or self.use_tex_reference:
+            if self.tex is not None:
+                return list(self.tex.size)
+            else:
+                return list(self.tex_reference_size)
         return [0, 0]
+
+    @property
+    def word_usage(self):
+        return getTmemWordUsage(self.tex_format, *self.tex_size)
+
+    @property
+    def format_type(self):
+        return texFormatOf[self.tex_format][len("G_IM_FMT_") :]
+
+    @property
+    def format_size(self):
+        return bitSizeDict[texBitSizeF3D[self.tex_format]]
 
     def draw_default_ui(self, layout: bpy.types.UILayout, index: int):
         def small_split(layout, prop: str, name: str):
