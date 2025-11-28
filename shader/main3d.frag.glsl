@@ -28,7 +28,6 @@ vec4 sampleSampler(in const sampler2D tex, in const TileConf tileConf, in vec2 u
   // https://github.com/rt64/rt64/blob/61aa08f517cd16c1dbee4e097768b08e2a060307/src/shaders/TextureSampler.hlsli#L156-L276
   const ivec2 texSize = textureSize(tex, 0);
 
-  uvCoord.y = texSize.y - uvCoord.y; // invert Y
   uvCoord *= tileConf.shift;
 
 #ifdef SIMULATE_LOW_PRECISION
