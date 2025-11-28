@@ -53,7 +53,7 @@ def get_oot_room_childrens(scene: bpy.types.Scene):
     for scene_obj in scene_objs:
         get_scene_children(scene_obj, scene_obj.name)
 
-    fake_room = RoomRenderInfo(render_state, None)
+    fake_room = RoomRenderInfo(render_state, "")
     for obj in bpy.data.objects:
         if obj.name not in oot_room_lookup:
             oot_room_lookup[obj.name] = fake_room
