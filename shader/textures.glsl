@@ -17,11 +17,34 @@ vec4 quantizeTexture(uint flags, vec4 color) {
   return flagSelect(flags, TEX_FLAG_MONO, colorQuant.rgba, colorQuant.rrrr);
 }
 
+vec2 mirrorUV(const vec2 uvIn, const vec2 uvBound)
+{
+    vec2 uvMod2 = mod(uvIn, uvBound * 2.0 + 1.0);
+    return mix(uvMod2, (uvBound * 2.0) - uvMod2, step(uvBound, uvMod2));
+}
+
+vec4 wrappedMirrorSample(const sampler2D tex, vec2 uv, const vec2 mask, const vec2 highMinusLow, const vec2 isClamp, const vec2 isMirror)
+{
+  const ivec2 texSize = textureSize(tex, 0);
+
+  // first apply clamping if enabled (clamp S/T, low S/T -> high S/T)
+  const vec2 uvClamp = clamp(uv, vec2(0.0), highMinusLow);
+  uv = mix(uv, uvClamp, isClamp);
+
+  // then mirror the result if needed (mirror S/T)
+  const vec2 uvMirror = mirrorUV(uv, mask - 0.5);
+  uv = mix(uv, uvMirror, isMirror);
+  
+  // clamp again (mask S/T), this is also done to avoid OOB texture access
+  uv = mod(uv, min(texSize, mask));
+
+  return texelFetch(tex, ivec2(floor(uv)), 0);
+}
+
 vec4 sampleSampler(in const sampler2D tex, in const TileConf tileConf, in vec2 uvCoord, in const uint texFilter) {
   // https://github.com/rt64/rt64/blob/61aa08f517cd16c1dbee4e097768b08e2a060307/src/shaders/TextureSampler.hlsli#L156-L276
   const ivec2 texSize = textureSize(tex, 0);
 
-  uvCoord.y = texSize.y - uvCoord.y; // invert Y
   uvCoord *= tileConf.shift;
 
 #ifdef SIMULATE_LOW_PRECISION
