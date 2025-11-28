@@ -53,7 +53,7 @@ def get_oot_room_childrens(scene: bpy.types.Scene):
     for scene_obj in scene_objs:
         get_scene_children(scene_obj, scene_obj.name)
 
-    fake_room = RoomRenderInfo(render_state, None)
+    fake_room = RoomRenderInfo(render_state, "")
     for obj in bpy.data.objects:
         if obj.name not in oot_room_lookup:
             oot_room_lookup[obj.name] = fake_room
@@ -125,7 +125,9 @@ def draw_oot_scene(
         room_queue = layer_queue.get(layer)
         if room_queue is None:
             continue
-        for room, obj_queue in sorted(room_queue.items(), key=lambda item: item[0].name):  # sort by layer
+        # sort by room name, this doesn't correspond to something the fast64 exporter or the game rendering does
+        # but it at least helps make the behavior reproducible
+        for room, obj_queue in sorted(room_queue.items(), key=lambda item: item[0].name):
             render_state = room.render_state.copy()
             render_state.set_values_from_cache(layer_rendermodes.get(layer, layer_rendermodes["Opaque"]))
             for info in dict(sorted(obj_queue.items(), key=lambda item: item[0])):  # sort by obj name

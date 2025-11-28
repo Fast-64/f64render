@@ -438,7 +438,7 @@ def f64_material_parse(f3d_mat: "F3DMaterialProperty", always_set: bool, set_lig
     elif use_tex0 or use_tex1:
         uv_basis = 0 if use_tex0 else 1
     if uv_basis is not None:
-        state.tex_size = tuple(getattr(f3d_mat, f"tex{uv_basis}").get_tex_size())
+        state.tex_size = tuple(getattr(f3d_mat, f"tex{uv_basis}").tex_size)
 
     if cc_uses["Texture 0"] and cc_uses["Texture 1"]:
         state.mip_count = f3d_mat.rdp_settings.num_textures_mipmapped - 1

@@ -38,7 +38,7 @@ float noise(in vec2 uv)
 
 vec2 mirrorUV(const vec2 uvIn, const vec2 uvBound)
 {
-    vec2 uvMod2 = mod(uvIn, uvBound * 2.0);
+    vec2 uvMod2 = mod(uvIn, uvBound * 2.0 + 1.0);
     return mix(uvMod2, (uvBound * 2.0) - uvMod2, step(uvBound, uvMod2));
 }
 
@@ -56,8 +56,6 @@ vec4 wrappedMirrorSample(const sampler2D tex, vec2 uv, const vec2 mask, const ve
   
   // clamp again (mask S/T), this is also done to avoid OOB texture access
   uv = mod(uv, min(texSize, mask));
-
-  uv.y = texSize.y - uv.y - 1; // invert Y back
 
   return texelFetch(tex, ivec2(floor(uv)), 0);
 }
