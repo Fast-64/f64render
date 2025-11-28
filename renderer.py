@@ -1,3 +1,4 @@
+from io import StringIO
 import math
 import pathlib
 import time
@@ -97,24 +98,24 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
         print("Compiling shader")
 
         shaderPath = (pathlib.Path(__file__).parent / "shader").resolve()
-        shaderVert = ""
-        shaderFrag = ""
+        shaderVert = StringIO()
+        shaderFrag = StringIO()
 
-        with open(shaderPath / "utils.glsl", "r", encoding="utf-8") as f:
-            shaderUtils = f.read()
-            shaderVert += shaderUtils
-            shaderFrag += shaderUtils
+        general_shaders = ("utils.glsl", "defines.glsl")
+        vertex_shaders = ("main3d.vert.glsl",)
+        frag_shaders = (
+            "textures.glsl",
+            "main3d.frag.glsl",
+        )
 
-        with open(shaderPath / "defines.glsl", "r", encoding="utf-8") as f:
-            shaderDef = f.read()
-            shaderVert += shaderDef
-            shaderFrag += shaderDef
-
-        with open(shaderPath / "main3d.vert.glsl", "r", encoding="utf-8") as f:
-            shaderVert += f.read()
-
-        with open(shaderPath / "main3d.frag.glsl", "r", encoding="utf-8") as f:
-            shaderFrag += f.read()
+        for shader in general_shaders + vertex_shaders:
+            with open(shaderPath / shader, "r", encoding="utf-8") as f:
+                shaderVert.write(f.read())
+                shaderVert.write("\n")
+        for shader in general_shaders + frag_shaders:
+            with open(shaderPath / shader, "r", encoding="utf-8") as f:
+                shaderFrag.write(f.read())
+                shaderFrag.write("\n")
 
         shader_info = gpu.types.GPUShaderCreateInfo()
 
@@ -158,8 +159,8 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
         else:
             shader_info.fragment_out(0, "VEC4", "FragColor")
 
-        shader_info.vertex_source(shaderVert)
-        shader_info.fragment_source(shaderFrag)
+        shader_info.vertex_source(shaderVert.getvalue())
+        shader_info.fragment_source(shaderFrag.getvalue())
 
         self.shader = gpu.shader.create_from_info(shader_info)
         self.shader_fallback = gpu.shader.from_builtin(

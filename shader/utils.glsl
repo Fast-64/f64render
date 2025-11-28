@@ -26,7 +26,7 @@ vec3 linearToGamma(in vec3 color) {
 #define cycleType() (OTHER_MODE_H & (3 << G_MDSFT_CYCLETYPE))
 #define texFilter() (OTHER_MODE_H & (3 << G_MDSFT_TEXTFILT))
 #define textPersp() (OTHER_MODE_H & (1 << G_MDSFT_TEXTPERSP))
-#define textLOD()   (OTHER_MODE_H & (1 << G_MDSFT_TEXTLOD))
+#define textLOD()   (bool(OTHER_MODE_H & (1 << G_MDSFT_TEXTLOD)))
 #define textDetail()(OTHER_MODE_H & (3 << G_MDSFT_TEXTDETAIL))
 
 #define boolSelect(cond, a, b) (bool(mix(a, b, cond)))
@@ -34,28 +34,4 @@ vec3 linearToGamma(in vec3 color) {
 float noise(in vec2 uv)
 {
   return fract(sin(dot(uv, vec2(12.9898, 78.233)))* 43758.5453);
-}
-
-vec2 mirrorUV(const vec2 uvIn, const vec2 uvBound)
-{
-    vec2 uvMod2 = mod(uvIn, uvBound * 2.0 + 1.0);
-    return mix(uvMod2, (uvBound * 2.0) - uvMod2, step(uvBound, uvMod2));
-}
-
-vec4 wrappedMirrorSample(const sampler2D tex, vec2 uv, const vec2 mask, const vec2 highMinusLow, const vec2 isClamp, const vec2 isMirror)
-{
-  const ivec2 texSize = textureSize(tex, 0);
-
-  // first apply clamping if enabled (clamp S/T, low S/T -> high S/T)
-  const vec2 uvClamp = clamp(uv, vec2(0.0), highMinusLow);
-  uv = mix(uv, uvClamp, isClamp);
-
-  // then mirror the result if needed (mirror S/T)
-  const vec2 uvMirror = mirrorUV(uv, mask - 0.5);
-  uv = mix(uv, uvMirror, isMirror);
-  
-  // clamp again (mask S/T), this is also done to avoid OOB texture access
-  uv = mod(uv, min(texSize, mask));
-
-  return texelFetch(tex, ivec2(floor(uv)), 0);
 }

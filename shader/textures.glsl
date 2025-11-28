@@ -1,0 +1,150 @@
+#ifdef GL_ARB_derivative_control
+  #extension GL_ARB_derivative_control : enable
+#endif
+
+vec4 quantize3Bit(in vec4 color) {
+  return vec4(round(color.rgb * 8.0) / 8.0, step(0.5, color.a));
+}
+
+vec4 quantize4Bit(in vec4 color) {
+  return round(color * 16.0) / 16.0; // (16 seems more accurate than 15)
+}
+
+vec4 quantizeTexture(uint flags, vec4 color) {
+  vec4 colorQuant = flagSelect(flags, TEX_FLAG_4BIT, color, quantize4Bit(color));
+  colorQuant = flagSelect(flags, TEX_FLAG_3BIT, colorQuant, quantize3Bit(colorQuant));
+  colorQuant.rgb = linearToGamma(colorQuant.rgb);
+  return flagSelect(flags, TEX_FLAG_MONO, colorQuant.rgba, colorQuant.rrrr);
+}
+
+vec2 mirrorUV(const vec2 uvIn, const vec2 uvBound)
+{
+    vec2 uvMod2 = mod(uvIn, uvBound * 2.0 + 1.0);
+    return mix(uvMod2, (uvBound * 2.0) - uvMod2, step(uvBound, uvMod2));
+}
+
+vec4 wrappedMirrorSample(const sampler2D tex, vec2 uv, const vec2 mask, const vec2 highMinusLow, const vec2 isClamp, const vec2 isMirror)
+{
+  const ivec2 texSize = textureSize(tex, 0);
+
+  // first apply clamping if enabled (clamp S/T, low S/T -> high S/T)
+  const vec2 uvClamp = clamp(uv, vec2(0.0), highMinusLow);
+  uv = mix(uv, uvClamp, isClamp);
+
+  // then mirror the result if needed (mirror S/T)
+  const vec2 uvMirror = mirrorUV(uv, mask - 0.5);
+  uv = mix(uv, uvMirror, isMirror);
+  
+  // clamp again (mask S/T), this is also done to avoid OOB texture access
+  uv = mod(uv, min(texSize, mask));
+
+  return texelFetch(tex, ivec2(floor(uv)), 0);
+}
+
+vec4 sampleSampler(in const sampler2D tex, in const TileConf tileConf, in vec2 uvCoord, in const uint texFilter) {
+  // https://github.com/rt64/rt64/blob/61aa08f517cd16c1dbee4e097768b08e2a060307/src/shaders/TextureSampler.hlsli#L156-L276
+  const ivec2 texSize = textureSize(tex, 0);
+
+  uvCoord *= tileConf.shift;
+
+#ifdef SIMULATE_LOW_PRECISION
+  // Simulates the lower precision of the hardware's coordinate interpolation.
+  uvCoord = round(uvCoord * LOW_PRECISION) / LOW_PRECISION;
+#endif
+
+  uvCoord -= tileConf.low;
+
+  const vec2 isClamp      = step(tileConf.mask, vec2(1.0)); // if mask is negated, clamp
+  const vec2 isMirror     = step(tileConf.high, vec2(0.0)); // if high is negated, mirror
+  const vec2 mask         = abs(tileConf.mask);
+  const vec2 highMinusLow = abs(tileConf.high) - abs(tileConf.low);
+
+  if (texFilter != G_TF_POINT) {
+    uvCoord -= 0.5 * tileConf.shift;
+    const vec2 texelBaseInt = floor(uvCoord);
+    const vec4 sample00 = wrappedMirrorSample(tex, texelBaseInt,              mask, highMinusLow, isClamp, isMirror);
+    const vec4 sample01 = wrappedMirrorSample(tex, texelBaseInt + vec2(0, 1), mask, highMinusLow, isClamp, isMirror);
+    const vec4 sample10 = wrappedMirrorSample(tex, texelBaseInt + vec2(1, 0), mask, highMinusLow, isClamp, isMirror);
+    const vec4 sample11 = wrappedMirrorSample(tex, texelBaseInt + vec2(1, 1), mask, highMinusLow, isClamp, isMirror);
+    const vec2 fracPart = uvCoord - texelBaseInt;
+#ifdef USE_LINEAR_FILTER
+    return quantizeTexture(tileConf.flags, mix(mix(sample00, sample10, fracPart.x), mix(sample01, sample11, fracPart.x), fracPart.y));
+#else
+    if (texFilter == G_TF_AVERAGE && all(lessThanEqual(vec2(1 / LOW_PRECISION), abs(fracPart - 0.5)))) {
+        return quantizeTexture(tileConf.flags, (sample00 + sample01 + sample10 + sample11) / 4.0f);
+    }
+    else {
+      // Originally written by ArthurCarvalho
+      // Sourced from https://www.emutalk.net/threads/emulating-nintendo-64-3-sample-bilinear-filtering-using-shaders.54215/
+      vec4 tri0 = mix(sample00, sample10, fracPart.x) + (sample01 - sample00) * fracPart.y;
+      vec4 tri1 = mix(sample11, sample01, 1.0 - fracPart.x) + (sample10 - sample11) * (1.0 - fracPart.y);
+      return quantizeTexture(tileConf.flags, mix(tri0, tri1, step(1.0, fracPart.x + fracPart.y)));
+    }
+#endif
+  }
+  else {
+    return quantizeTexture(tileConf.flags, wrappedMirrorSample(tex, ivec2(floor(uvCoord)), mask, highMinusLow, isClamp, isMirror));
+  }
+}
+
+vec4 sampleIndex(in const uint textureIndex, in const vec2 uvCoord, in const uint texFilter) {
+  TileConf tileConf = material.texConfs[textureIndex];
+  switch (textureIndex) {
+    default: return sampleSampler(tex0, tileConf, uvCoord, texFilter);
+    case 1: return sampleSampler(tex1, tileConf, uvCoord, texFilter);
+    case 2: return sampleSampler(tex2, tileConf, uvCoord, texFilter);
+    case 3: return sampleSampler(tex3, tileConf, uvCoord, texFilter);
+    case 4: return sampleSampler(tex4, tileConf, uvCoord, texFilter);
+    case 5: return sampleSampler(tex5, tileConf, uvCoord, texFilter);
+    case 6: return sampleSampler(tex6, tileConf, uvCoord, texFilter);
+    case 7: return sampleSampler(tex7, tileConf, uvCoord, texFilter);
+  }
+}
+
+void computeLOD(
+    inout uint tileIndex0,
+    inout uint tileIndex1,
+    const bool textLOD,
+    const uint textDetail,
+    const float minLod,
+    const vec2 dx,
+    const vec2 dy,
+    const bool perspectiveOverflow, // this should be possible from what I've read in parallel-rdp, can always be removed
+    out float lodFrac
+) {
+    const bool sharpen = textDetail == G_TD_SHARPEN;
+    const bool detail = textDetail == G_TD_DETAIL;
+    const bool clam = textDetail == G_TD_CLAMP;
+
+    const vec2 dfd = max(dx, dy);
+    // TODO: should this value be scaled by clipping planes?
+    const float maxDist = max(dfd.x, dfd.y);
+
+    const uint mipBase = uint(floor(log2(maxDist)));
+    const bool distant = perspectiveOverflow || maxDist >= 16384.0;
+    const bool aboveCount = mipBase >= material.mipCount;
+    const bool maxDistant = distant || aboveCount;
+    const bool magnify = maxDist < 1.0;
+
+    const float detailFrac = max(minLod, maxDist) - float(sharpen); 
+    const float magnifedFrac = mix(float(maxDistant), detailFrac, float(!clam));
+    const float distantFrac = float(distant || (aboveCount && clam));
+    const float notClampedFrac = max(maxDist / pow(2, max(mipBase, 0)) - 1.0, minLod);
+
+    const float notMagnifedFrac = mix(distantFrac, notClampedFrac, !maxDistant || !clam);
+    lodFrac = mix(notMagnifedFrac, magnifedFrac, float(!distant && magnify));
+
+    if (textLOD) {
+        const uint tileOffset = maxDistant ? material.mipCount : (mipBase * int(!(maxDistant && clam)));
+        tileIndex0 = tileIndex0 + tileOffset;
+        tileIndex1 = tileIndex0;
+        if (detail) {
+            tileIndex1 += (int(!(maxDistant || magnify)) + 1);
+            tileIndex0 += int(!magnify);
+        } else {
+            tileIndex1 += uint(!maxDistant && (sharpen || !magnify));
+        }
+        tileIndex0 &= 7;
+        tileIndex1 &= 7;
+    }
+}
