@@ -1,5 +1,6 @@
 import bpy
-from bpy.types import PropertyGroup, Image
+from bpy.types import PropertyGroup, Image, AddonPreferences
+from bpy.props import BoolProperty
 
 from .globals import F64_GLOBALS
 
@@ -163,13 +164,6 @@ def rebuild_shaders(_scene, _context):
 
 
 class F64RenderSettings(bpy.types.PropertyGroup):
-    use_atomic_rendering: bpy.props.BoolProperty(
-        name="Use Atomic Rendering",
-        default=True,
-        description="Atomic rendering will draw to a depth and color buffer seperately, which allows for proper blender and decal emulation.\n"
-        "This may cause artifacts if your GPU does not support the interlock extension",
-        update=rebuild_shaders,
-    )
     sources_tab: bpy.props.BoolProperty(name="Default Sources")
     default_prim_color: bpy.props.FloatVectorProperty(
         description="Primitive Color",
@@ -268,8 +262,6 @@ class F64RenderSettings(bpy.types.PropertyGroup):
                 prop_split(layout, self, "oot_specific_room", "Specific Room")
             layout.separator()
 
-        if bpy.app.version >= (4, 1, 0):
-            layout.prop(self, "use_atomic_rendering")
         layout.prop(self, "always_set")
         layout.prop(self, "sources_tab", icon="TRIA_DOWN" if self.sources_tab else "TRIA_RIGHT")
         if self.sources_tab:
@@ -300,5 +292,23 @@ class F64RenderSettings(bpy.types.PropertyGroup):
                     tex_prop.draw_default_ui(texture_box, i)
 
 
-class F64RenderProperties(bpy.types.PropertyGroup):
+class F64RenderProperties(PropertyGroup):
     render_settings: bpy.props.PointerProperty(type=F64RenderSettings)
+
+
+class F64AddonPreferences(AddonPreferences):
+    bl_idname = __name__.split(".")[0]
+
+    use_atomic_rendering: bpy.props.BoolProperty(
+        name="Use Atomic Rendering",
+        default=True,
+        description="Atomic rendering will draw to a depth and color buffer seperately, which allows for proper blender and decal emulation.\n"
+        "This may cause artifacts if your GPU does not support the interlock extension",
+        update=rebuild_shaders,
+    )
+    dont_warn_about_mesa: BoolProperty()
+
+    def draw_props(self, layout: bpy.types.UILayout):
+        atomic_col = layout.column()
+        atomic_col.prop(self, "use_atomic_rendering")
+        atomic_col.enabled = bpy.app.version >= (4, 1, 0)
