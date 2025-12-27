@@ -1,6 +1,8 @@
 from io import StringIO
 import math
+import os
 import pathlib
+import sys
 import time
 
 import bpy
@@ -39,6 +41,27 @@ def materials_set_light_direction(scene):
     return not (scene.gameEditorMode == "SM64" and scene.fast64.sm64.matstack_fix)
 
 
+def flag_enabled(flag_name: str) -> bool:
+    true_values = {"1", "true", "yes", "on"}
+
+    if os.environ.get(flag_name, "").lower() in true_values:
+        return True
+
+    return False
+
+
+def check_if_under_mesa():
+    vendor = gpu.platform.vendor_get()
+    renderer = gpu.platform.renderer_get()
+    version = gpu.platform.version_get()
+    combined = (vendor + renderer + version).lower()
+    return "mesa" in combined or "llvmpipe" in combined
+
+
+def show_mesa_warning():
+    bpy.ops.dialog.f64_mesa_warning("INVOKE_DEFAULT")
+
+
 class Fast64RenderEngine(bpy.types.RenderEngine):
     bl_idname = "FAST64_RENDER_ENGINE"
     bl_label = "Fast64 Renderer"
@@ -72,13 +95,36 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
             # Create a 1x1 image
             bpy.data.images.new("f64render_missing_texture", 1, 1).pixels = MISSING_TEXTURE_COLOR
 
-        ext_list = gpu.capabilities.extensions_get()
+        self.is_mesa_driver = check_if_under_mesa()
+        if self.is_mesa_driver:
+            print("Mesa drivers detected!")
+        self.allow_glsl_extension_directive_midshader = not self.is_mesa_driver or flag_enabled(
+            "allow_glsl_extension_directive_midshader"
+        )
+        if self.is_mesa_driver:
+            if self.allow_glsl_extension_directive_midshader:
+                print(
+                    'Sucefully bypassed Mesa restriction on GLSL extensions via "allow_glsl_extension_directive_midshader"!'
+                )
+            else:
+                print("GLSL extension directives mid-shader are disabled!")
+
+        if self.allow_glsl_extension_directive_midshader:
+            ext_list = gpu.capabilities.extensions_get()
+        else:
+            ext_list = []
         self.shader_interlock_support = "GL_ARB_fragment_shader_interlock" in ext_list
         if not self.shader_interlock_support:
-            print("\n\nWarning: GL_ARB_fragment_shader_interlock not supported!\n\n")
+            print("Warning: GL_ARB_fragment_shader_interlock not supported!")
+        self.shader_derivative_control_support = "GL_ARB_derivative_control" in ext_list
+        if not self.shader_derivative_control_support:
+            print("Warning: GL_ARB_derivative_control not supported!")
         if bpy.app.version < (4, 1, 0):
-            print("\n\nWarning: Blender version too old! Expect limited blending emulation!\n\n")
+            print("Warning: Blender version too old! Expect limited blending emulation!")
         self.draw_range_impl = bpy.app.version >= (3, 6, 0)
+
+        if not self.allow_glsl_extension_directive_midshader and self.is_mesa_driver:
+            bpy.app.timers.register(show_mesa_warning)
 
     def __del__(self):
         def remove_handler(handler, func):
@@ -133,6 +179,8 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
             shader_info.define("depth_unchanged", "depth_any")
             if self.shader_interlock_support:
                 shader_info.define("USE_SHADER_INTERLOCK", "1")
+            if self.shader_derivative_control_support:
+                shader_info.define("USE_DERIVATIVE_CONTROL", "1")
             shader_info.define("BLEND_EMULATION", "1")
         # Using the already calculated view space normals instead of transforming the light direction makes
         # for cleaner and faster code
@@ -279,7 +327,8 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
         f64render_rs: F64RenderSettings = depsgraph.scene.f64render.render_settings
         always_set = f64render_rs.always_set
         projection_matrix, view_matrix = context.region_data.perspective_matrix, context.region_data.view_matrix
-        self.use_atomic_rendering = bpy.app.version >= (4, 1, 0) and f64render_rs.use_atomic_rendering
+        prefs = context.preferences.addons[__name__.split(".")[0]].preferences
+        self.use_atomic_rendering = bpy.app.version >= (4, 1, 0) and prefs.use_atomic_rendering
 
         if F64_GLOBALS.rebuild_shaders or self.shader is None:
             F64_GLOBALS.rebuild_shaders = False
@@ -364,6 +413,8 @@ class F64RenderSettingsPanel(bpy.types.Panel):
     def draw(self, context):
         f64render_rs: F64RenderSettings = context.scene.f64render.render_settings
         f64render_rs.draw_props(self.layout, context.scene.gameEditorMode)
+        prefs = context.preferences.addons[__name__.split(".")[0]].preferences
+        prefs.draw_props(self.layout)
 
 
 def draw_render_settings(self, context: bpy.types.Context):

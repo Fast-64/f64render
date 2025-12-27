@@ -1,7 +1,3 @@
-#ifdef GL_ARB_derivative_control
-  #extension GL_ARB_derivative_control : enable
-#endif
-
 vec4 quantize3Bit(in vec4 color) {
   return vec4(round(color.rgb * 8.0) / 8.0, step(0.5, color.a));
 }

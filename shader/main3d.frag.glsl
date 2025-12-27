@@ -4,6 +4,10 @@
   layout(pixel_interlock_unordered) in;
 #endif
 
+#ifdef USE_DERIVATIVE_CONTROL
+  #extension GL_ARB_derivative_control : enable
+#endif
+
 #define DECAL_DEPTH_DELTA 100
 
 vec3 cc_fetchColor(in int val, in vec4 shade, in vec4 comb, in float lodFraction, in vec4 texData0, in vec4 texData1)
@@ -144,7 +148,7 @@ void main()
 
   vec4 ccShade = geoModeSelect(G_SHADE_SMOOTH, cc_shade_flat, cc_shade);
 
-#ifdef GL_ARB_derivative_control
+#ifdef USE_DERIVATIVE_CONTROL
   const vec2 dx = abs(vec2(dFdxCoarse(inputUV.x), dFdyCoarse(inputUV.x)));
   const vec2 dy = abs(vec2(dFdxCoarse(inputUV.y), dFdyCoarse(inputUV.y)));
 #else
