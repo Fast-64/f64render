@@ -1,10 +1,12 @@
-// allows for a per-pixel atomic access to the depth texture (needed for decals & blending)
-#ifdef USE_SHADER_INTERLOCK
-  #extension GL_ARB_fragment_shader_interlock : enable
-  layout(pixel_interlock_unordered) in;
+#ifdef BLEND_EMULATION
+    #ifdef USE_GL_ARB_fragment_shader_interlock
+        // allows for a per-pixel atomic access to the depth texture (needed for decals & blending)
+        #extension GL_ARB_fragment_shader_interlock : enable
+        layout(pixel_interlock_unordered) in;
+    #endif
 #endif
 
-#ifdef USE_DERIVATIVE_CONTROL
+#ifdef USE_GL_ARB_derivative_control
   #extension GL_ARB_derivative_control : enable
 #endif
 
@@ -148,7 +150,7 @@ void main()
 
   vec4 ccShade = geoModeSelect(G_SHADE_SMOOTH, cc_shade_flat, cc_shade);
 
-#ifdef USE_DERIVATIVE_CONTROL
+#ifdef USE_GL_ARB_derivative_control
   const vec2 dx = abs(vec2(dFdxCoarse(inputUV.x), dFdyCoarse(inputUV.x)));
   const vec2 dy = abs(vec2(dFdxCoarse(inputUV.y), dFdyCoarse(inputUV.y)));
 #else
@@ -216,7 +218,7 @@ void main()
 
   if(alphaTestFailed)writeDepth = -0xFFFFFF;
 
-  #ifdef USE_SHADER_INTERLOCK
+  #ifdef USE_GL_ARB_fragment_shader_interlock
     beginInvocationInterlockARB();
   #else
     if(alphaTestFailed)discard; // discarding in interlock seems to cause issues, only do it here
@@ -227,7 +229,7 @@ void main()
     uint writeColor = 0;
     color_depth_blending(alphaTestFailed, writeDepth, currDepth, ccValue, oldColorInt, writeColor);
 
-    #ifdef USE_SHADER_INTERLOCK
+    #ifdef USE_GL_ARB_fragment_shader_interlock
       imageAtomicCompSwap(color_texture, screenPosPixel, oldColorInt, writeColor.r);
     #else
       int count = 4;
@@ -242,7 +244,7 @@ void main()
     #endif
   }
   
-  #ifdef USE_SHADER_INTERLOCK
+  #ifdef USE_GL_ARB_fragment_shader_interlock
     endInvocationInterlockARB();
   #endif
 
