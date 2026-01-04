@@ -11,7 +11,7 @@ import gpu
 
 from .utils.addon import addon_set_fast64_path
 from .material.parser import f64_parse_obj_light
-from .common import ObjRenderInfo, draw_f64_obj, get_scene_render_state, collect_obj_info
+from .common import draw_f64_obj, get_scene_render_state, collect_obj_info, check_if_using_renderer
 from .properties import F64RenderProperties, F64RenderSettings
 from .globals import F64_GLOBALS
 
@@ -424,34 +424,8 @@ class F64RenderSettingsPanel(bpy.types.Panel):
 
 
 def draw_render_settings(self, context: bpy.types.Context):
-    space_data = context.space_data
-    if (
-        context.scene.render.engine == Fast64RenderEngine.bl_idname
-        and space_data.type == "VIEW_3D"
-        and space_data.shading.type in {"MATERIAL", "RENDERED"}
-    ):
+    if check_if_using_renderer(context):
         self.layout.popover(F64RenderSettingsPanel.bl_idname)
-
-
-# The light color is only shown in the UI in the DATA_PT_EEVEE_light panel,
-# which is only shown with EEVEE enabled. The DATA_PT_light panel is shown otherwise,
-# but only allows changing the light type.
-# This panel extends the DATA_PT_light panel to allow setting the light color.
-class LightDataPanel(bpy.types.Panel):
-    bl_label = "f64render light data"
-    bl_idname = "DATA_PT_f64render_light_data"
-    bl_space_type = "PROPERTIES"
-    bl_region_type = "WINDOW"
-    bl_context = "data"
-    bl_parent_id = "DATA_PT_light"
-    bl_options = {"HIDE_HEADER"}
-
-    @classmethod
-    def poll(cls, context):
-        return context.scene is not None and context.scene.render.engine == Fast64RenderEngine.bl_idname
-
-    def draw(self, context):
-        self.layout.prop(context.light, "color")
 
 
 # By default blender will hide quite a few panels like materials or vertex attributes
