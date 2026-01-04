@@ -11,7 +11,7 @@ import gpu
 
 from .utils.addon import addon_set_fast64_path
 from .material.parser import f64_parse_obj_light
-from .common import ObjRenderInfo, draw_f64_obj, get_scene_render_state, collect_obj_info
+from .common import draw_f64_obj, get_scene_render_state, collect_obj_info, check_if_using_renderer
 from .properties import F64RenderProperties, F64RenderSettings
 from .globals import F64_GLOBALS
 
@@ -424,12 +424,7 @@ class F64RenderSettingsPanel(bpy.types.Panel):
 
 
 def draw_render_settings(self, context: bpy.types.Context):
-    space_data = context.space_data
-    if (
-        context.scene.render.engine == Fast64RenderEngine.bl_idname
-        and space_data.type == "VIEW_3D"
-        and space_data.shading.type in {"MATERIAL", "RENDERED"}
-    ):
+    if check_if_using_renderer(context):
         self.layout.popover(F64RenderSettingsPanel.bl_idname)
 
 
