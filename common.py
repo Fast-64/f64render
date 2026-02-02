@@ -175,6 +175,7 @@ def collect_obj_info(
 
         mat_count = max(len(obj.material_slots), 1)
         vert_buf = create_vert_buf(
+            render_engine.shader,
             render_engine.vbo_format,
             render_obj.vert,
             render_obj.norm,
