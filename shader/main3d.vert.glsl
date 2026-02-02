@@ -1,6 +1,20 @@
 
 void main() 
 {
+  gl_Position = matMVP * vec4(pos, 1.0);
+  posScreen = gl_Position.xy / gl_Position.w;
+  
+  // quantize depth to what the RDP has (16bit)
+  gl_Position.z = ceil(gl_Position.z * 0x7FFF) / 0x7FFF;
+  // move the depth ever so slightly to avoid z-fighting with blenders own overlays
+  // e.g. transparent faces in face-edit mode, lines & points
+  // don't offset decals to make manual depth checks work later
+#ifdef BLEND_EMULATION
+  gl_Position.z += drawFlagSelect(DRAW_FLAG_DECAL, 0.00006, 0.0); // don't offset decals to make manual depth checks work later
+#else
+  gl_Position.z *= 1.00000018;
+#endif
+
   // Directional light
   vec3 norm = inNormal;
   vec3 normScreen = normalize(matNorm * norm);
@@ -24,6 +38,20 @@ void main()
   lightTotal.a = 1.0;
 
   vec3 shadeWithLight = geoModeSelect(G_PACKED_NORMALS, lightTotal.rgb, cc_shade.rgb * lightTotal.rgb);
+  
+  if ((GEO_MODE & G_FOG) != 0) {
+    const vec2 nearFar = scene.clippingPlanes / scene.blenderScale;
+    const float n = nearFar.x;
+    const float f = nearFar.y;
+    const float z = gl_Position.z;
+    const float nfz = ((n * f * 2 / max(z, 0)) - n - f) / (n - f);
+    cc_shade.a = mapRange(
+      mapRange(nfz, -1.0, 1.0, 0.0, 1000.0), 
+      material.fogPos.x, material.fogPos.y,
+      0.0, 1.0
+    );
+  }
+  
   cc_shade.rgb = geoModeSelect(G_LIGHTING, cc_shade.rgb, shadeWithLight);
   cc_shade = clamp(cc_shade, 0.0, 1.0);
   cc_shade_flat = cc_shade;
@@ -34,22 +62,4 @@ void main()
 
   // @TODO: uvgen (f3d + t3d)
   // forward CC (@TODO: do part of this here? e.g. prim/env/shade etc.)
-
-  vec3 posQuant = pos;
-  //posQuant = round(posQuant * 10) * 0.1;
-  
-  gl_Position = matMVP * vec4(posQuant, 1.0);
-  posScreen = gl_Position.xy / gl_Position.w;
-  
-  // quantize depth to what the RDP has (16bit)
-  gl_Position.z = ceil(gl_Position.z * 0x7FFF) / 0x7FFF;
-  // move the depth ever so slightly to avoid z-fighting with blenders own overlays
-  // e.g. transparent faces in face-edit mode, lines & points
-
-#ifdef BLEND_EMULATION
-// don't offset decals to make manual depth checks work later
-  gl_Position.z += drawFlagSelect(DRAW_FLAG_DECAL, 0.00006, 0.0);
-#else
-  gl_Position.z = gl_Position.z * 1.00000018;
-#endif
 }

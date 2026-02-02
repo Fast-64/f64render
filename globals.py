@@ -9,7 +9,7 @@ class F64Globals:
         self.materials_cache: dict[bpy.types.Material, "F64Material"] = {}
         self.meshCache: dict["MeshBuffers"] = {}
         self.obj_lights: dict[str, "F64Light"] = {}
-        self.sm64_area_lookup: dict | None = None
+        self.sm64_area_lookup: dict[str, "AreaRenderInfo"] | None = None
         self.oot_room_lookup: dict | None = None  # oot
         self.rebuild_shaders = True
         self.current_ucode = self.world_lighting = self.current_gamemode = None

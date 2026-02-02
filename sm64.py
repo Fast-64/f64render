@@ -4,8 +4,8 @@ from typing import NamedTuple
 import bpy
 import mathutils
 
-from .material.parser import parse_f3d_rendermode_preset, F64RenderState
-from .common import ObjRenderInfo, draw_f64_obj, collect_obj_info, get_scene_render_state
+from .material.parser import F64Fog, parse_f3d_rendermode_preset, F64RenderState, quantize_srgb
+from .common import ObjRenderInfo, draw_f64_obj, collect_obj_info, get_scene_render_state, SCENE_UNIFORM_BUFFER_STRUCT
 from .properties import F64RenderSettings
 from .globals import F64_GLOBALS
 
@@ -13,6 +13,8 @@ from .globals import F64_GLOBALS
 class AreaRenderInfo(NamedTuple):  # areas, etc
     render_state: F64RenderState
     name: str
+    area_fog_state: F64RenderState | None = None
+    clip_planes: tuple[int, int] = (0, 0)
 
     def __hash__(self):
         return hash(self.name)
@@ -22,26 +24,34 @@ def get_sm64_area_childrens(scene: bpy.types.Scene):
     if F64_GLOBALS.sm64_area_lookup is not None:
         return F64_GLOBALS.sm64_area_lookup
 
-    sm64_area_lookup = {}
+    sm64_area_lookup: dict[str, AreaRenderInfo] = {}
     render_state = get_scene_render_state(scene)
     level_objs: list[bpy.types.Object] = []
     area_objs: list[bpy.types.Object] = []
 
-    def get_area_children(obj: bpy.types.Object, name: str = ""):
+    def get_area_info(obj: bpy.types.Object):
+        state = None
+        if obj.fast64.sm64.area.set_fog:
+            state = F64RenderState(
+                fog=F64Fog(
+                    quantize_srgb(obj.area_fog_color),
+                    tuple(int(x) for x in obj.area_fog_position),
+                )
+            )
+        return AreaRenderInfo(render_state, obj.name, state, obj.clipPlanes)
+
+    def get_area_children(obj: bpy.types.Object, area_render_info: AreaRenderInfo):
         for child in sorted(obj.children, key=lambda item: item.name):
             if child not in area_objs:
-                sm64_area_lookup[child.name] = AreaRenderInfo(render_state, name)
-                get_area_children(child, name)
+                sm64_area_lookup[child.name] = area_render_info
+                get_area_children(child, area_render_info)
             else:
-                get_area_children(child, child.name)
+                get_area_children(child, get_area_info(child))
 
-    def get_level_children(obj: bpy.types.Object, name: str):
+    def get_level_children(obj: bpy.types.Object):
         for child in sorted(obj.children, key=lambda item: item.name):
             if child in area_objs:
-                get_area_children(child, child.name)
-            else:
-                sm64_area_lookup[child.name] = AreaRenderInfo(render_state, name)
-                get_level_children(child, name)
+                get_area_children(child, get_area_info(child))
 
     for obj in bpy.data.objects:  # find all area type objects
         if obj.type == "EMPTY" and obj.sm64_obj_type == "Area Root":
@@ -53,9 +63,9 @@ def get_sm64_area_childrens(scene: bpy.types.Scene):
                 area_objs.append(obj)
 
     for level_obj in level_objs:
-        get_level_children(level_obj, level_obj.name)
+        get_level_children(level_obj)
 
-    fake_area = AreaRenderInfo(render_state, "")
+    fake_area = AreaRenderInfo(render_state, "", F64RenderState(fog=F64Fog(quantize_srgb((0, 0, 0, 0)), (0, 0))))
     for obj in bpy.data.objects:
         if obj.name not in sm64_area_lookup:
             sm64_area_lookup[obj.name] = fake_area
@@ -86,6 +96,8 @@ def draw_sm64_scene(
     view_matrix: mathutils.Matrix,
     always_set: bool,
 ):
+    from fast64_internal.utility import get_blender_to_game_scale
+
     f64render_rs: F64RenderSettings = depsgraph.scene.f64render.render_settings
 
     layer_rendermodes = {}  # TODO: should this be cached globally?
@@ -128,8 +140,13 @@ def draw_sm64_scene(
             obj_queue[obj_name].mats.append(mat_info)
 
     for area, layer_queue in area_queue.items():
+        render_engine.scene_ubo.update(
+            SCENE_UNIFORM_BUFFER_STRUCT.pack(
+                *(round(x) for x in area.clip_planes), get_blender_to_game_scale(bpy.context)
+            )
+        )
         render_state = area.render_state.copy()
         for layer, obj_queue in sorted(layer_queue.items(), key=lambda item: item[0]):  # sort by layer
             render_state.set_values_from_cache(layer_rendermodes[layer])
             for info in dict(sorted(obj_queue.items(), key=lambda item: item[0])):  # sort by obj name
-                draw_f64_obj(render_engine, render_state, obj_queue[info])
+                draw_f64_obj(render_engine, render_state, obj_queue[info], area.area_fog_state)

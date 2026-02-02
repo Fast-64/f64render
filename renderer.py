@@ -11,7 +11,14 @@ import gpu
 
 from .utils.addon import addon_set_fast64_path
 from .material.parser import f64_parse_obj_light
-from .common import ObjRenderInfo, draw_f64_obj, get_scene_render_state, collect_obj_info
+from .common import (
+    SCENE_UNIFORM_BUFFER_STRUCT,
+    ObjRenderInfo,
+    draw_f64_obj,
+    get_scene_render_state,
+    collect_obj_info,
+    SCENE_UNIFORM_BUFFER_SIZE,
+)
 from .properties import F64RenderProperties, F64RenderSettings
 from .globals import F64_GLOBALS
 
@@ -75,6 +82,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
         self.shader_2d = None
         self.shader_fallback = None
         self.vbo_format = None
+        self.scene_ubo = None
         self.draw_handler = None
         self.use_atomic_rendering = True
 
@@ -187,10 +195,12 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
         shader_info.define("VIEWSPACE_LIGHTING", "0" if scene.fast64.renderSettings.useWorldSpaceLighting else "1")
         shader_info.define("SIMULATE_LOW_PRECISION", "1")
 
+        shader_info.uniform_buf(0, "UBO_Scene", "scene")
+
         shader_info.push_constant("MAT4", "matMVP")
         shader_info.push_constant("MAT3", "matNorm")
 
-        shader_info.uniform_buf(0, "UBO_Material", "material")
+        shader_info.uniform_buf(1, "UBO_Material", "material")
 
         shader_info.vertex_in(0, "VEC3", "pos")  # keep blenders name keep for better compat.
         shader_info.vertex_in(1, "VEC3", "inNormal")
@@ -215,6 +225,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
             "3D_UNIFORM_COLOR" if bpy.app.version < (3, 4, 0) else "UNIFORM_COLOR"
         )
         self.vbo_format = self.shader.format_calc()
+        self.scene_ubo = gpu.types.GPUUniformBuf(bytes(SCENE_UNIFORM_BUFFER_SIZE))
 
     def init_shader_2d(self):
         if not self.shader_2d:
@@ -316,6 +327,8 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
             Stats(profile).strip_dirs().sort_stats(SortKey.CUMULATIVE).print_stats()
 
     def draw_scene(self, context, depsgraph):
+        from fast64_internal.utility import get_blender_to_game_scale
+
         # TODO: fixme, after reloading this script during dev, something calls this function
         #       with an invalid reference (viewport?)
         if repr(self).endswith("invalid>"):
@@ -325,6 +338,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
 
         space_view_3d = context.space_data
         f64render_rs: F64RenderSettings = depsgraph.scene.f64render.render_settings
+        fast64_rs = depsgraph.scene.fast64.renderSettings
         always_set = f64render_rs.always_set
         projection_matrix, view_matrix = context.region_data.perspective_matrix, context.region_data.view_matrix
         prefs = context.preferences.addons[__name__.split(".")[0]].preferences
@@ -352,6 +366,13 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
         gpu.state.depth_test_set("NONE")
         gpu.state.depth_mask_set(False)
         gpu.state.blend_set("NONE")
+
+        self.scene_ubo.update(
+            SCENE_UNIFORM_BUFFER_STRUCT.pack(
+                *(round(x) for x in fast64_rs.clippingPlanes), get_blender_to_game_scale(context)
+            )
+        )
+        self.shader.uniform_block("scene", self.scene_ubo)
 
         # get visible objects, this cannot be done in despgraph objects for whatever reason
         hidden_objs = {ob.name for ob in bpy.context.view_layer.objects if not ob.visible_get() and ob.data is not None}

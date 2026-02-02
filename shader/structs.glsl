@@ -1,5 +1,11 @@
 // NOTE: this file is included by blender via 'shader_info.typedef_source(...)'
 
+struct UBO_Scene 
+{
+  ivec2 clippingPlanes;
+  float blenderScale;
+};
+
 struct Light
 {
   vec4 color;
@@ -34,6 +40,8 @@ struct UBO_Material
   vec2 primDepth;
   vec4 env;
   vec4 ambientColor;
+  vec4 fogColor;
+  vec4 blendColor;
   vec3 ckCenter;
   float alphaClip;
   vec3 ckScale;
@@ -43,6 +51,7 @@ struct UBO_Material
   vec4 k0123;
   vec2 k45;
   uvec2 texSize;
+  vec2 fogPos;
 };
 
 #define GEO_MODE     material.modes.x
