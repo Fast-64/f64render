@@ -13,11 +13,11 @@ from .utils.addon import addon_set_fast64_path
 from .material.parser import f64_parse_obj_light
 from .common import (
     SCENE_UNIFORM_BUFFER_STRUCT,
-    ObjRenderInfo,
     draw_f64_obj,
     get_scene_render_state,
     collect_obj_info,
     SCENE_UNIFORM_BUFFER_SIZE,
+    check_if_using_renderer,
 )
 from .properties import F64RenderProperties, F64RenderSettings
 from .globals import F64_GLOBALS
@@ -61,6 +61,9 @@ def check_if_under_mesa():
     vendor = gpu.platform.vendor_get()
     renderer = gpu.platform.renderer_get()
     version = gpu.platform.version_get()
+    print("GPU Vendor:", vendor)
+    print("GPU Renderer:", renderer)
+    print("GPU Version:", version)
     combined = (vendor + renderer + version).lower()
     return "mesa" in combined or "llvmpipe" in combined
 
@@ -117,21 +120,25 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
             else:
                 print("GLSL extension directives mid-shader are disabled!")
 
-        if self.allow_glsl_extension_directive_midshader:
-            ext_list = gpu.capabilities.extensions_get()
-        else:
-            ext_list = []
-        self.shader_interlock_support = "GL_ARB_fragment_shader_interlock" in ext_list
-        if not self.shader_interlock_support:
-            print("Warning: GL_ARB_fragment_shader_interlock not supported!")
-        self.shader_derivative_control_support = "GL_ARB_derivative_control" in ext_list
-        if not self.shader_derivative_control_support:
-            print("Warning: GL_ARB_derivative_control not supported!")
+        ext_list = gpu.capabilities.extensions_get()
+        self.available_extensions = []
+        useful_exts = ["GL_ARB_fragment_shader_interlock", "GL_ARB_derivative_control"]
+        mesa_caused_issues = False
+        for ext in useful_exts:
+            if ext in ext_list:
+                if self.allow_glsl_extension_directive_midshader:
+                    self.available_extensions.append(ext)
+                else:
+                    print(f"Warning: {ext} supported, but cannot be enabled due to driver.")
+                    mesa_caused_issues = True
+            else:
+                print(f"Warning: {ext} not supported!")
+
         if bpy.app.version < (4, 1, 0):
             print("Warning: Blender version too old! Expect limited blending emulation!")
         self.draw_range_impl = bpy.app.version >= (3, 6, 0)
 
-        if not self.allow_glsl_extension_directive_midshader and self.is_mesa_driver:
+        if not self.allow_glsl_extension_directive_midshader and self.is_mesa_driver and mesa_caused_issues:
             bpy.app.timers.register(show_mesa_warning)
 
     def __del__(self):
@@ -183,12 +190,11 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
         vert_out.smooth("VEC2", "inputUV")
         vert_out.no_perspective("VEC2", "posScreen")
 
+        for ext in self.available_extensions:
+            shader_info.define(f"USE_{ext}", "1")
+
         if self.use_atomic_rendering:
             shader_info.define("depth_unchanged", "depth_any")
-            if self.shader_interlock_support:
-                shader_info.define("USE_SHADER_INTERLOCK", "1")
-            if self.shader_derivative_control_support:
-                shader_info.define("USE_DERIVATIVE_CONTROL", "1")
             shader_info.define("BLEND_EMULATION", "1")
         # Using the already calculated view space normals instead of transforming the light direction makes
         # for cleaner and faster code
@@ -439,12 +445,7 @@ class F64RenderSettingsPanel(bpy.types.Panel):
 
 
 def draw_render_settings(self, context: bpy.types.Context):
-    space_data = context.space_data
-    if (
-        context.scene.render.engine == Fast64RenderEngine.bl_idname
-        and space_data.type == "VIEW_3D"
-        and space_data.shading.type in {"MATERIAL", "RENDERED"}
-    ):
+    if check_if_using_renderer(context):
         self.layout.popover(F64RenderSettingsPanel.bl_idname)
 
 

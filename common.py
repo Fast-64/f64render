@@ -7,6 +7,8 @@ import bpy
 import mathutils
 import gpu
 
+from bpy.types import Context
+
 from .material.parser import (
     parse_f3d_rendermode_preset,
     quantize_direction,
@@ -252,3 +254,13 @@ def collect_obj_info(
 
         info.mats.append((i, indices_count, f64mat))
     return info
+
+
+def check_if_using_renderer(context: Context):
+    """ONLY applies to view 3d. For ambigous cases use context.scene.render.engine == 'FAST64_RENDER_ENGINE'"""
+    space_data = context.space_data
+    return (
+        context.scene.render.engine == "FAST64_RENDER_ENGINE"
+        and space_data.type == "VIEW_3D"
+        and space_data.shading.type in {"MATERIAL", "RENDERED"}
+    )

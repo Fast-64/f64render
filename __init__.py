@@ -21,14 +21,18 @@ bl_info = {
     "category": "3D View",
 }
 
+from .light_prop import draw_light_color
 from . import auto_load
+import bpy
 
 auto_load.init()
 
 
 def register():
+    bpy.types.DATA_PT_light.append(draw_light_color)
     auto_load.register()
 
 
 def unregister():
     auto_load.unregister()
+    bpy.types.DATA_PT_light.remove(draw_light_color)
