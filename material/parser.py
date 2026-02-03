@@ -213,7 +213,7 @@ class F64Rendermode:
 
 @dataclass
 class F64Light:
-    color: F64Color = (0, 0, 0, 0)
+    color: F64Color | None = None
     direction: tuple[float, float, float] | None = None
 
 
@@ -240,10 +240,10 @@ class F64RenderState:
         float, float, float, float, float, float, float, float, float, float, float, float, float, float, float, float
     ] | None = None
     render_mode: F64Rendermode | None = None
-    flags: int = 0
-    geo_mode: int = 0
-    othermode_l: int = 0
-    othermode_h: int = 0
+    flags: int = None
+    geo_mode: int = None
+    othermode_l: int = None
+    othermode_h: int = None
     prim_depth: tuple[float, float] = None
     tex_size: tuple[int, int] = None
     mip_count: int = None
@@ -302,6 +302,8 @@ class F64RenderState:
         if self.render_mode is not None:
             blender = self.render_mode.blender
             alpha_clip = self.render_mode.alpha_clip
+            if flags is None:
+                flags = 0
             flags |= self.render_mode.flags
 
         ck = self.ck
