@@ -208,7 +208,7 @@ class F64Rendermode:
     blend: str = "NONE"
     depth_test: str = "LESS_EQUAL"
     depth_write: bool = True
-    alpha_clip: float = -1
+    alpha_clip: float = None
 
 
 @dataclass
@@ -298,7 +298,7 @@ class F64RenderState:
             else:
                 tex_data.extend(mask(t.values, 9))
 
-        blender, alpha_clip, flags = None, -1, self.flags
+        blender, alpha_clip, flags = None, None, self.flags
         if self.render_mode is not None:
             blender = self.render_mode.blender
             alpha_clip = self.render_mode.alpha_clip
