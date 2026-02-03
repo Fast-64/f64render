@@ -204,15 +204,15 @@ void main()
   // If no interlock is available, we use a re-try loop to ensure that the correct color value is written.
   // Note that this fallback can create small artifacts since depth and color are not able to be synchronized together.
   ivec2 screenPosPixel = ivec2(trunc(gl_FragCoord.xy));
+  
+  float wRaw = gl_FragCoord.w * 0xFFFFFF * scene.blenderScale;
+  int clippedDepth = int(clamp((wRaw - scene.clippingPlanes.x) / (scene.clippingPlanes.y - scene.clippingPlanes.x), 0.0, 1.0) * 0xFFFFFF);
+  int currDepth = int(mixSelect(zSource() == G_ZS_PRIM, clippedDepth, material.primDepth.x));
 
-  int currDepth = int(mixSelect(zSource() == G_ZS_PRIM, gl_FragCoord.w * 0xFFFFF, material.primDepth.x));
-  int writeDepth = int(drawFlagSelect(DRAW_FLAG_DECAL, currDepth, -0xFFFFFF));
-
-  if((DRAW_FLAGS & DRAW_FLAG_ALPHA_BLEND) != 0) {
+  int writeDepth = currDepth;
+  if((DRAW_FLAGS & (DRAW_FLAG_ALPHA_BLEND | DRAW_FLAG_DECAL)) != 0 && alphaTestFailed) {
     writeDepth = -0xFFFFFF;
   }
-
-  if(alphaTestFailed)writeDepth = -0xFFFFFF;
 
   #ifdef USE_GL_ARB_fragment_shader_interlock
     beginInvocationInterlockARB();
