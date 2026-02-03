@@ -77,7 +77,7 @@ def get_scene_render_state(scene: bpy.types.Scene):
             )
         ),
         convert=quantize_tuple(f64render_rs.default_convert, 9.0, -1.0, 1.0),
-        fog=F64Fog(quantize_srgb(fast64_rs.fogPreviewColor, force_alpha=True), pos=tuple(fast64_rs.fogPreviewPosition)),
+        fog=F64Fog(quantize_tuple(fast64_rs.fogPreviewColor, 8), pos=tuple(fast64_rs.fogPreviewPosition)),
         blend_color=quantize_srgb(f64render_rs.default_blend_color),
         cc=SOLID_CC,
         tex_confs=([get_tile_conf(getattr(f64render_rs, f"default_tex{i}")) for i in range(0, 8)]),

@@ -416,7 +416,7 @@ def f64_material_parse(f3d_mat: "F3DMaterialProperty", always_set: bool, set_lig
         state.convert = tuple(getattr(f3d_mat, f"k{i}") for i in range(0, 6))
     if always_set or (f3d_mat.set_fog and f3d_mat.rdp_settings.using_fog):
         f64mat.use_area_fog = f3d_mat.use_global_fog
-        state.fog = F64Fog(quantize_srgb(f3d_mat.fog_color, force_alpha=True), tuple(f3d_mat.fog_position))
+        state.fog = F64Fog(quantize_tuple(f3d_mat.fog_color, 8), tuple(f3d_mat.fog_position))
     if always_set or f3d_mat.set_blend:
         state.blend_color = quantize_srgb(f3d_mat.blend_color)
     if always_set or (cc_uses["Shade"] and rdp.g_lighting and f3d_mat.set_lights):

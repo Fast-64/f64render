@@ -4,7 +4,7 @@ from typing import NamedTuple
 import bpy
 import mathutils
 
-from .material.parser import F64Fog, parse_f3d_rendermode_preset, F64RenderState, quantize_srgb
+from .material.parser import F64Fog, parse_f3d_rendermode_preset, F64RenderState, quantize_srgb, quantize_tuple
 from .common import ObjRenderInfo, draw_f64_obj, collect_obj_info, get_scene_render_state, SCENE_UNIFORM_BUFFER_STRUCT
 from .properties import F64RenderSettings
 from .globals import F64_GLOBALS
@@ -33,10 +33,7 @@ def get_sm64_area_childrens(scene: bpy.types.Scene):
         state = None
         if obj.fast64.sm64.area.set_fog:
             state = F64RenderState(
-                fog=F64Fog(
-                    quantize_srgb(obj.area_fog_color),
-                    tuple(int(x) for x in obj.area_fog_position),
-                )
+                fog=F64Fog(quantize_tuple(obj.area_fog_color, 8), tuple(int(x) for x in obj.area_fog_position))
             )
         return AreaRenderInfo(render_state, obj.name, state, obj.clipPlanes)
 
