@@ -297,7 +297,7 @@ class F64RenderProperties(PropertyGroup):
 
 
 class F64AddonPreferences(AddonPreferences):
-    bl_idname = __name__.split(".")[0]
+    bl_idname = __package__
 
     use_atomic_rendering: bpy.props.BoolProperty(
         name="Use Atomic Rendering",
