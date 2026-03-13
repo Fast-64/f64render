@@ -21,8 +21,6 @@ from .oot import draw_oot_scene
 # N64 is y-up, blender is z-up
 yup_to_zup = mathutils.Quaternion((1, 0, 0), math.radians(90.0)).to_matrix().to_4x4()
 
-MISSING_TEXTURE_COLOR = (0, 0, 0, 1)
-
 
 def cache_del_by_mesh(mesh_name):
     for key in list(F64_GLOBALS.meshCache.keys()):
@@ -93,10 +91,6 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
         bpy.app.handlers.depsgraph_update_post.append(Fast64RenderEngine.mesh_change_listener)
         bpy.app.handlers.frame_change_post.append(Fast64RenderEngine.mesh_change_listener)
         bpy.app.handlers.load_pre.append(Fast64RenderEngine.on_file_load)
-
-        if "f64render_missing_texture" not in bpy.data.images:
-            # Create a 1x1 image
-            bpy.data.images.new("f64render_missing_texture", 1, 1).pixels = MISSING_TEXTURE_COLOR
 
         self.is_mesa_driver = check_if_under_mesa()
         if self.is_mesa_driver:

@@ -4,6 +4,8 @@ import gpu
 from dataclasses import dataclass
 import numpy as np
 
+MISSING_TEXTURE_COLOR = (0, 0, 0, 1)
+
 TEX_FLAG_MONO = 1 << 0
 TEX_FLAG_4BIT = 1 << 1
 TEX_FLAG_3BIT = 1 << 2
@@ -27,7 +29,15 @@ def get_tile_conf(tex: "TextureProperty") -> F64Texture:
         if tex.tex_format == "IA4":
             flags |= TEX_FLAG_3BIT
     else:
-        buff = gpu.texture.from_image(bpy.data.images["f64render_missing_texture"])
+        buff = gpu.types.GPUTexture(
+            (1, 1),
+            format="RGBA8",
+            data=gpu.types.Buffer(
+                "FLOAT",
+                (1, 1, 4),
+                [[MISSING_TEXTURE_COLOR]],
+            ),
+        )
         flags |= TEX_FLAG_MONO
 
     conf = np.array(
