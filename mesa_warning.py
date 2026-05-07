@@ -10,7 +10,7 @@ class MesaWarningPopup(Operator):
     already_invoked = False  # HACK: used to prevent multiple dialogs from popping up
 
     def invoke(self, context: Context, event: Event):
-        prefs = context.preferences.addons[__name__.split(".")[0]].preferences
+        prefs = context.preferences.addons[__package__].preferences
         if prefs.dont_warn_about_mesa:
             return {"CANCELLED"}
         if MesaWarningPopup.already_invoked:
@@ -47,7 +47,7 @@ class MesaWarningPopup(Operator):
             icon="INFO",
         )
 
-        prefs = context.preferences.addons[__name__.split(".")[0]].preferences
+        prefs = context.preferences.addons[__package__].preferences
         col.prop(prefs, "dont_warn_about_mesa", text="Don't warn me again")
 
     def cancel(self, context: Context):

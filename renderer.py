@@ -347,7 +347,7 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
         fast64_rs = depsgraph.scene.fast64.renderSettings
         always_set = f64render_rs.always_set
         projection_matrix, view_matrix = context.region_data.perspective_matrix, context.region_data.view_matrix
-        prefs = context.preferences.addons[__name__.split(".")[0]].preferences
+        prefs = context.preferences.addons[__package__].preferences
         self.use_atomic_rendering = bpy.app.version >= (4, 1, 0) and prefs.use_atomic_rendering
 
         if F64_GLOBALS.rebuild_shaders or self.shader is None:
@@ -422,7 +422,8 @@ class Fast64RenderEngine(bpy.types.RenderEngine):
 
         # @TODO: why can't i cache this?
         vbo_2d = gpu.types.GPUVertBuf(self.shader_2d.format_calc(), 6)
-        vbo_2d.attr_fill("pos", [(-1, -1), (-1, 1), (1, 1), (1, 1), (1, -1), (-1, -1)])
+        aid = self.shader_2d.attr_from_name("pos")
+        vbo_2d.attr_fill(aid, [(-1, -1), (-1, 1), (1, 1), (1, 1), (1, -1), (-1, -1)])
         batch_2d = gpu.types.GPUBatch(type="TRIS", buf=vbo_2d)
 
         self.shader_2d.image("color_texture", self.color_texture)
@@ -440,7 +441,7 @@ class F64RenderSettingsPanel(bpy.types.Panel):
     def draw(self, context):
         f64render_rs: F64RenderSettings = context.scene.f64render.render_settings
         f64render_rs.draw_props(self.layout, context.scene.gameEditorMode)
-        prefs = context.preferences.addons[__name__.split(".")[0]].preferences
+        prefs = context.preferences.addons[__package__].preferences
         prefs.draw_props(self.layout)
 
 

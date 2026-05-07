@@ -81,7 +81,7 @@ def mesh_to_buffers(mesh: bpy.types.Mesh) -> MeshBuffers:
     color_layer = getColorLayer(mesh, layer="Col")
     if color_layer is not None:
         colors_tmp = np.empty((len(color_layer), 4), dtype=np.float32)
-        if bpy.app.version > (3, 2, 0):
+        if bpy.app.version >= (3, 4, 0):
             color_layer.foreach_get("color_srgb", colors_tmp.ravel())
         else:  # vectorized linear -> sRGB conversion
             color_layer.foreach_get("color", colors_tmp.ravel())
