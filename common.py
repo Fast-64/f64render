@@ -265,3 +265,13 @@ def check_if_using_renderer(context: Context):
         and space_data.type == "VIEW_3D"
         and space_data.shading.type in {"MATERIAL", "RENDERED"}
     )
+
+
+def update_scene_ubo_generic(render_engine: "Fast64RenderEngine", scene: bpy.types.Scene):
+    from fast64_internal.utility import get_blender_to_game_scale
+
+    render_engine.scene_ubo.update(
+        SCENE_UNIFORM_BUFFER_STRUCT.pack(
+            *(round(x) for x in scene.fast64.renderSettings.clippingPlanes), get_blender_to_game_scale(bpy.context)
+        )
+    )
