@@ -114,9 +114,12 @@ bool color_depth_blending(
   int oldDepth = imageAtomicMax(depth_texture, screenPosPixel, writeDepth);
   int depthDiff = int(mixSelect(zSource() == G_ZS_PRIM, abs(oldDepth - currDepth), material.primDepth.y));
 
-  bool depthTest = currDepth >= oldDepth;
-  if((DRAW_FLAGS & DRAW_FLAG_DECAL) != 0) {
-    depthTest = depthDiff <= DECAL_DEPTH_DELTA;
+  bool depthTest = false;
+  if (currDepth > 0) {
+    depthTest = currDepth >= oldDepth;
+    if((DRAW_FLAGS & DRAW_FLAG_DECAL) != 0) {
+      depthTest = depthDiff <= DECAL_DEPTH_DELTA;
+    }
   }
 
   oldColorInt = imageLoad(color_texture, screenPosPixel).r;
@@ -210,14 +213,14 @@ void main()
   int currDepth = int(mixSelect(zSource() == G_ZS_PRIM, clippedDepth, material.primDepth.x));
 
   int writeDepth = currDepth;
-  if((DRAW_FLAGS & (DRAW_FLAG_ALPHA_BLEND | DRAW_FLAG_DECAL)) != 0 && alphaTestFailed) {
+  if((DRAW_FLAGS & (DRAW_FLAG_ALPHA_BLEND | DRAW_FLAG_DECAL)) != 0 || alphaTestFailed) {
     writeDepth = -0xFFFFFF;
   }
 
   #ifdef USE_GL_ARB_fragment_shader_interlock
     beginInvocationInterlockARB();
   #else
-    if(alphaTestFailed)discard; // discarding in interlock seems to cause issues, only do it here
+    if(alphaTestFailed || writeDepth < 0) discard; // discarding in interlock seems to cause issues, only do it here
   #endif
 
   {

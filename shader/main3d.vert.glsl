@@ -43,10 +43,10 @@ void main()
     const vec2 nearFar = scene.clippingPlanes / scene.blenderScale;
     const float n = nearFar.x;
     const float f = nearFar.y;
-    const float z = gl_Position.z;
+    const float z = gl_Position.w;
     const float nfz = ((n * f * 2 / max(z, 0)) - n - f) / (n - f);
     cc_shade.a = mapRange(
-      mapRange(nfz, -1.0, 1.0, 0.0, 1000.0), 
+      mapRange(nfz, 0, 1, 0.0, 1000.0), 
       material.fogPos.x, material.fogPos.y,
       0.0, 1.0
     );

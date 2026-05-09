@@ -170,7 +170,7 @@ def draw_oot_scene(
                 current = get_time_of_day_settings(scene.obj)
                 render_engine.scene_ubo.update(
                     SCENE_UNIFORM_BUFFER_STRUCT.pack(
-                        *(round(x) for x in (10, current.z_far)), get_blender_to_game_scale(bpy.context)
+                        *(round(x) for x in (10, current.z_far * 1000)), get_blender_to_game_scale(bpy.context)
                     )
                 )
             room_queue = scene_queue.get(scene_name)
