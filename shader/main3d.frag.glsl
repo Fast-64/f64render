@@ -10,7 +10,7 @@
   #extension GL_ARB_derivative_control : enable
 #endif
 
-#define DECAL_DEPTH_DELTA 100
+#define DECAL_DEPTH_DELTA 10
 
 vec3 cc_fetchColor(in int val, in vec4 shade, in vec4 comb, in float lodFraction, in vec4 texData0, in vec4 texData1)
 {
@@ -114,12 +114,9 @@ bool color_depth_blending(
   int oldDepth = imageAtomicMax(depth_texture, screenPosPixel, writeDepth);
   int depthDiff = int(mixSelect(zSource() == G_ZS_PRIM, abs(oldDepth - currDepth), material.primDepth.y));
 
-  bool depthTest = false;
-  if (currDepth > 0) {
-    depthTest = currDepth >= oldDepth;
-    if((DRAW_FLAGS & DRAW_FLAG_DECAL) != 0) {
-      depthTest = depthDiff <= DECAL_DEPTH_DELTA;
-    }
+  bool depthTest = currDepth >= oldDepth;
+  if((DRAW_FLAGS & DRAW_FLAG_DECAL) != 0) {
+    depthTest = depthDiff <= DECAL_DEPTH_DELTA;
   }
 
   oldColorInt = imageLoad(color_texture, screenPosPixel).r;
@@ -136,6 +133,25 @@ bool color_depth_blending(
 
   if(shouldDiscard)oldColorInt = writeColor;
   return shouldDiscard;
+}
+
+int applyDepthPrecisionLoss(int z15) {
+    int z18 = z15 << 3;
+
+    int shift;
+  
+    #if (__VERSION__ >= 400) || (defined(GL_ES) && __VERSION__ >= 310)
+        shift = max(0, findMSB(~z18 & 0x3F000) - 11);
+    #else
+        shift = (z18 < 0x20000) ? 6 :
+                (z18 < 0x30000) ? 5 :
+                (z18 < 0x38000) ? 4 :
+                (z18 < 0x3C000) ? 3 :
+                (z18 < 0x3E000) ? 2 :
+                (z18 < 0x3F000) ? 1 : 0;
+    #endif
+
+    return (z18 >> shift << shift) >> 3;
 }
 #endif
 
@@ -207,15 +223,25 @@ void main()
   // If no interlock is available, we use a re-try loop to ensure that the correct color value is written.
   // Note that this fallback can create small artifacts since depth and color are not able to be synchronized together.
   ivec2 screenPosPixel = ivec2(trunc(gl_FragCoord.xy));
-  
-  float wRaw = gl_FragCoord.w * 0xFFFFFF * scene.blenderScale;
-  int clippedDepth = int(clamp((wRaw - scene.clippingPlanes.x) / (scene.clippingPlanes.y - scene.clippingPlanes.x), 0.0, 1.0) * 0xFFFFFF);
-  int currDepth = int(mixSelect(zSource() == G_ZS_PRIM, clippedDepth, material.primDepth.x));
 
-  int writeDepth = currDepth;
+  int writeDepth;
+  if (zSource() == G_ZS_PRIM) {
+    writeDepth = int(material.primDepth.x); 
+  } 
+  else {
+      float zScaled = (gl_FragCoord.z / gl_FragCoord.w) * scene.blenderScale;
+      float normalizedDepth = (zScaled - scene.clippingPlanes.x) / (scene.clippingPlanes.y - scene.clippingPlanes.x);
+      writeDepth = int(normalizedDepth * 0x7fff);
+  }
+  writeDepth = 0x7FFF - applyDepthPrecisionLoss(writeDepth);
+  int curDepth = writeDepth;
   if((DRAW_FLAGS & (DRAW_FLAG_ALPHA_BLEND | DRAW_FLAG_DECAL)) != 0 || alphaTestFailed) {
     writeDepth = -0xFFFFFF;
   }
+  if (curDepth <= 0 || curDepth > 0x7fff) {
+    discard;
+  }
+  //ccValue = vec4(mapRange(curDepth, 0, 0x7fff, 0.0, 1.0));
 
   #ifdef USE_GL_ARB_fragment_shader_interlock
     beginInvocationInterlockARB();
@@ -226,7 +252,7 @@ void main()
   {
     uint oldColorInt = 0;
     uint writeColor = 0;
-    color_depth_blending(alphaTestFailed, writeDepth, currDepth, ccShade, ccValue, oldColorInt, writeColor);
+    color_depth_blending(alphaTestFailed, writeDepth, curDepth, ccShade, ccValue, oldColorInt, writeColor);
 
     #ifdef USE_GL_ARB_fragment_shader_interlock
       imageAtomicCompSwap(color_texture, screenPosPixel, oldColorInt, writeColor.r);
@@ -234,7 +260,7 @@ void main()
       int count = 4;
       while(imageAtomicCompSwap(color_texture, screenPosPixel, oldColorInt, writeColor.r) != oldColorInt && count > 0)  {
         --count;
-        if(color_depth_blending(alphaTestFailed, writeDepth, currDepth, ccShade, ccValue, oldColorInt, writeColor)) {
+        if(color_depth_blending(alphaTestFailed, writeDepth, curDepth, ccShade, ccValue, oldColorInt, writeColor)) {
           break;
         }
       }
