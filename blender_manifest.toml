@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "f64render"
-version = "0.0.1"
+version = "0.0.3"
 name = "f64render"
 tagline = "Render engine for fast64 materials"
 maintainer = "Max Bebök, Fast64 community"
@@ -12,6 +12,7 @@ website = "https://github.com/Fast-64/f64render"
 tags = ["3D View", "Material", "Render"]
 
 blender_version_min = "4.2.0"
+blender_version_max = "5.0.0"
 
 license = [
   "SPDX:GPL-3.0-or-later",
