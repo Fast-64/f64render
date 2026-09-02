@@ -16,7 +16,7 @@ bl_info = {
     "author": "Max Bebök, Fast64 community",
     "description": "Render engine for fast64 materials.",
     "blender": (3, 2, 0),
-    "version": (0, 0, 1),
+    "version": (0, 0, 2),
     "location": "Render Properties > Render Engine",
     "category": "3D View",
 }
