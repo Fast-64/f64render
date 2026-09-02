@@ -35,3 +35,7 @@ float noise(in vec2 uv)
 {
   return fract(sin(dot(uv, vec2(12.9898, 78.233)))* 43758.5453);
 }
+
+float mapRange(const float x, const float fromMin, const float fromMax, const float toMin, const float toMax) { 
+  return toMin + (clamp(x, fromMin, fromMax) - fromMin) * (toMax - toMin) / (fromMax - fromMin); 
+}

@@ -193,6 +193,9 @@ class F64RenderSettings(bpy.types.PropertyGroup):
         min=0,
         max=1,
     )
+    default_blend_color: bpy.props.FloatVectorProperty(
+        description="Blend Color", subtype="COLOR", size=4, min=0, max=1, default=(1, 1, 1, 1)
+    )
 
     chroma_tab: bpy.props.BoolProperty(name="Chroma Key")
     default_key_center: bpy.props.FloatVectorProperty(
@@ -271,6 +274,7 @@ class F64RenderSettings(bpy.types.PropertyGroup):
             prim_lod_row.prop(self, "default_lod_frac", text="Frac")
             prim_lod_row.prop(self, "default_lod_min", text="Min")
             prop_split(sources_box, self, "default_env_color", "Environment")
+            prop_split(sources_box, self, "default_blend_color", "Blend")
 
             sources_box.prop(self, "chroma_tab", icon="TRIA_DOWN" if self.chroma_tab else "TRIA_RIGHT")
             if self.chroma_tab:

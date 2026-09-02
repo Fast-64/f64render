@@ -10,7 +10,7 @@
   #extension GL_ARB_derivative_control : enable
 #endif
 
-#define DECAL_DEPTH_DELTA 100
+#define DECAL_DEPTH_DELTA 10
 
 vec3 cc_fetchColor(in int val, in vec4 shade, in vec4 comb, in float lodFraction, in vec4 texData0, in vec4 texData1)
 {
@@ -68,40 +68,36 @@ vec4 cc_clampValue(in vec4 value)
 
 #ifdef BLEND_EMULATION
 vec4 blender_fetch(
-  in int val, in vec4 colorBlend, in vec4 colorFog, in vec4 colorFB, in vec4 colorCC,
-  in vec4 blenderA
+    in int val, in vec4 ccShade, in vec4 colorFB, in vec4 colorCC, in vec4 blenderA
 )
 {
        if (val == BLENDER_1      ) return vec4(1.0);
   else if (val == BLENDER_CLR_IN ) return colorCC;
   else if (val == BLENDER_CLR_MEM) return colorFB;
-  else if (val == BLENDER_CLR_BL ) return colorBlend;
-  else if (val == BLENDER_CLR_FOG) return colorCC;//colorFog; //@TODO: implemnent fog
+  else if (val == BLENDER_CLR_BL ) return material.blendColor;
+  else if (val == BLENDER_CLR_FOG) return material.fogColor;
   else if (val == BLENDER_A_IN   ) return colorCC.aaaa;
-  else if (val == BLENDER_A_FOG  ) return colorFog.aaaa;
-  else if (val == BLENDER_A_SHADE) return cc_shade.aaaa;
+  else if (val == BLENDER_A_FOG  ) return material.fogColor.aaaa;
+  else if (val == BLENDER_A_SHADE) return ccShade.aaaa;
   else if (val == BLENDER_1MA    ) return 1.0 - blenderA.aaaa;
   else if (val == BLENDER_A_MEM  ) return colorFB.aaaa;
   return vec4(0.0); // default: BLENDER_0
 }
 
-vec4 blendColor(in vec4 oldColor, vec4 newColor)
+vec4 blendColor(in vec4 oldColor, in vec4 ccShade, vec4 newColor)
 {
-  vec4 colorBlend = vec4(0.0); // @TODO
-  vec4 colorFog = vec4(1.0, 0.0, 0.0, 1.0); // @TODO
-
-  vec4 P = blender_fetch(material.blender[0][0], colorBlend, colorFog, oldColor, newColor, vec4(0.0));
-  vec4 A = blender_fetch(material.blender[0][1], colorBlend, colorFog, oldColor, newColor, vec4(0.0));
-  vec4 M = blender_fetch(material.blender[0][2], colorBlend, colorFog, oldColor, newColor, A);
-  vec4 B = blender_fetch(material.blender[0][3], colorBlend, colorFog, oldColor, newColor, A);
+  vec4 P = blender_fetch(material.blender[0][0], ccShade, oldColor, newColor, vec4(0.0));
+  vec4 A = blender_fetch(material.blender[0][1], ccShade, oldColor, newColor, vec4(0.0));
+  vec4 M = blender_fetch(material.blender[0][2], ccShade, oldColor, newColor, A);
+  vec4 B = blender_fetch(material.blender[0][3], ccShade, oldColor, newColor, A);
 
   vec4 res = ((P * A) + (M * B)) / (A + B);
   res.a = gammaToLinear(newColor.aaa).r; // preserve for 'A_IN'
 
-  P = blender_fetch(material.blender[1][0], colorBlend, colorFog, oldColor, res, vec4(0.0));
-  A = blender_fetch(material.blender[1][1], colorBlend, colorFog, oldColor, res, vec4(0.0));
-  M = blender_fetch(material.blender[1][2], colorBlend, colorFog, oldColor, res, A);
-  B = blender_fetch(material.blender[1][3], colorBlend, colorFog, oldColor, res, A);
+  P = blender_fetch(material.blender[1][0], ccShade, oldColor, res, vec4(0.0));
+  A = blender_fetch(material.blender[1][1], ccShade, oldColor, res, vec4(0.0));
+  M = blender_fetch(material.blender[1][2], ccShade, oldColor, res, A);
+  B = blender_fetch(material.blender[1][3], ccShade, oldColor, res, A);
 
   return ((P * A) + (M * B)) / (A + B);
 }
@@ -110,7 +106,7 @@ vec4 blendColor(in vec4 oldColor, vec4 newColor)
 // All of this must happen in a way that guarantees coherency.
 // This is either done via the shader interlock extension, or with a re-try loop as a fallback.
 bool color_depth_blending(
-  in bool alphaTestFailed, in int writeDepth, in int currDepth, in vec4 ccValue,
+  in bool alphaTestFailed, in int writeDepth, in int currDepth, in vec4 ccShade, in vec4 ccValue,
   out uint oldColorInt, out uint writeColor
 )
 {
@@ -127,7 +123,7 @@ bool color_depth_blending(
   vec4 oldColor = unpackUnorm4x8(oldColorInt);
   oldColor.a = 0.0;
   
-  vec4 ccValueBlended = blendColor(oldColor, vec4(ccValue.rgb, pow(ccValue.a, 1.0 / GAMMA_FACTOR)));
+  vec4 ccValueBlended = blendColor(oldColor, ccShade, vec4(ccValue.rgb, pow(ccValue.a, 1.0 / GAMMA_FACTOR)));
   
   bool shouldDiscard = alphaTestFailed || !depthTest;
 
@@ -137,6 +133,25 @@ bool color_depth_blending(
 
   if(shouldDiscard)oldColorInt = writeColor;
   return shouldDiscard;
+}
+
+int applyDepthPrecisionLoss(int z15) {
+    int z18 = z15 << 3;
+
+    int shift;
+  
+    #if (__VERSION__ >= 400) || (defined(GL_ES) && __VERSION__ >= 310)
+        shift = max(0, findMSB(~z18 & 0x3F000) - 11);
+    #else
+        shift = (z18 < 0x20000) ? 6 :
+                (z18 < 0x30000) ? 5 :
+                (z18 < 0x38000) ? 4 :
+                (z18 < 0x3C000) ? 3 :
+                (z18 < 0x3E000) ? 2 :
+                (z18 < 0x3F000) ? 1 : 0;
+    #endif
+
+    return (z18 >> shift << shift) >> 3;
 }
 #endif
 
@@ -209,25 +224,35 @@ void main()
   // Note that this fallback can create small artifacts since depth and color are not able to be synchronized together.
   ivec2 screenPosPixel = ivec2(trunc(gl_FragCoord.xy));
 
-  int currDepth = int(mixSelect(zSource() == G_ZS_PRIM, gl_FragCoord.w * 0xFFFFF, material.primDepth.x));
-  int writeDepth = int(drawFlagSelect(DRAW_FLAG_DECAL, currDepth, -0xFFFFFF));
-
-  if((DRAW_FLAGS & DRAW_FLAG_ALPHA_BLEND) != 0) {
+  int writeDepth;
+  if (zSource() == G_ZS_PRIM) {
+    writeDepth = int(material.primDepth.x); 
+  } 
+  else {
+      float zScaled = (gl_FragCoord.z / gl_FragCoord.w) * scene.blenderScale;
+      float normalizedDepth = (zScaled - scene.clippingPlanes.x) / (scene.clippingPlanes.y - scene.clippingPlanes.x);
+      writeDepth = int(normalizedDepth * 0x7fff);
+  }
+  writeDepth = 0x7FFF - applyDepthPrecisionLoss(writeDepth);
+  int curDepth = writeDepth;
+  if((DRAW_FLAGS & (DRAW_FLAG_ALPHA_BLEND | DRAW_FLAG_DECAL)) != 0 || alphaTestFailed) {
     writeDepth = -0xFFFFFF;
   }
-
-  if(alphaTestFailed)writeDepth = -0xFFFFFF;
+  if (curDepth <= 0 || curDepth > 0x7fff) {
+    discard;
+  }
+  //ccValue = vec4(mapRange(curDepth, 0, 0x7fff, 0.0, 1.0));
 
   #ifdef USE_GL_ARB_fragment_shader_interlock
     beginInvocationInterlockARB();
   #else
-    if(alphaTestFailed)discard; // discarding in interlock seems to cause issues, only do it here
+    if(alphaTestFailed || writeDepth < 0) discard; // discarding in interlock seems to cause issues, only do it here
   #endif
 
   {
     uint oldColorInt = 0;
     uint writeColor = 0;
-    color_depth_blending(alphaTestFailed, writeDepth, currDepth, ccValue, oldColorInt, writeColor);
+    color_depth_blending(alphaTestFailed, writeDepth, curDepth, ccShade, ccValue, oldColorInt, writeColor);
 
     #ifdef USE_GL_ARB_fragment_shader_interlock
       imageAtomicCompSwap(color_texture, screenPosPixel, oldColorInt, writeColor.r);
@@ -235,7 +260,7 @@ void main()
       int count = 4;
       while(imageAtomicCompSwap(color_texture, screenPosPixel, oldColorInt, writeColor.r) != oldColorInt && count > 0)  {
         --count;
-        if(color_depth_blending(alphaTestFailed, writeDepth, currDepth, ccValue, oldColorInt, writeColor)) {
+        if(color_depth_blending(alphaTestFailed, writeDepth, curDepth, ccShade, ccValue, oldColorInt, writeColor)) {
           break;
         }
       }

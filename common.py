@@ -20,6 +20,7 @@ from .material.parser import (
     F64Material,
     F64RenderState,
     F64Light,
+    F64Fog,
 )
 from .material.cc import SOLID_CC
 from .material.tile import get_tile_conf
@@ -40,6 +41,13 @@ def get_struct_ubo_size(s: struct.Struct):
 
 
 UBO_SIZE = get_struct_ubo_size(UNIFORM_BUFFER_STRUCT)
+
+SCENE_UNIFORM_BUFFER_STRUCT = struct.Struct(
+    "2i"  # clipping planes
+    "f"  # blender scale
+)
+
+SCENE_UNIFORM_BUFFER_SIZE = get_struct_ubo_size(SCENE_UNIFORM_BUFFER_STRUCT)
 
 
 @dataclasses.dataclass
@@ -69,6 +77,8 @@ def get_scene_render_state(scene: bpy.types.Scene):
             )
         ),
         convert=quantize_tuple(f64render_rs.default_convert, 9.0, -1.0, 1.0),
+        fog=F64Fog(quantize_tuple(fast64_rs.fogPreviewColor, 8), pos=tuple(fast64_rs.fogPreviewPosition)),
+        blend_color=quantize_srgb(f64render_rs.default_blend_color),
         cc=SOLID_CC,
         tex_confs=([get_tile_conf(getattr(f64render_rs, f"default_tex{i}")) for i in range(0, 8)]),
         tex_size=(32, 32),
@@ -84,7 +94,12 @@ def get_scene_render_state(scene: bpy.types.Scene):
     return state
 
 
-def draw_f64_obj(render_engine: "Fast64RenderEngine", render_state: F64RenderState, info: ObjRenderInfo):
+def draw_f64_obj(
+    render_engine: "Fast64RenderEngine",
+    render_state: F64RenderState,
+    info: ObjRenderInfo,
+    area_fog_state: F64RenderState = None,
+):
     mvp = info.mvp_matrix
     bbox = info.render_obj.bounding_box
 
@@ -121,6 +136,8 @@ def draw_f64_obj(render_engine: "Fast64RenderEngine", render_state: F64RenderSta
 
     for mat_idx, indices_count, f64mat in info.mats:
         render_state.set_values_from_cache(f64mat.state)
+        if f64mat.use_area_fog and area_fog_state is not None:
+            render_state.set_values_from_cache(area_fog_state)
 
         gpu.state.face_culling_set(f64mat.cull)
         if not render_engine.use_atomic_rendering:
@@ -247,4 +264,14 @@ def check_if_using_renderer(context: Context):
         context.scene.render.engine == "FAST64_RENDER_ENGINE"
         and space_data.type == "VIEW_3D"
         and space_data.shading.type in {"MATERIAL", "RENDERED"}
+    )
+
+
+def update_scene_ubo_generic(render_engine: "Fast64RenderEngine", scene: bpy.types.Scene):
+    from fast64_internal.utility import get_blender_to_game_scale
+
+    render_engine.scene_ubo.update(
+        SCENE_UNIFORM_BUFFER_STRUCT.pack(
+            *(round(x) for x in scene.fast64.renderSettings.clippingPlanes), get_blender_to_game_scale(bpy.context)
+        )
     )

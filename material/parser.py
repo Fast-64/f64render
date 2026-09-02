@@ -191,9 +191,9 @@ UNIFORM_BUFFER_STRUCT = struct.Struct(
     (TILE_STRUCT * 8) + (LIGHT_STRUCT * 8) + "8i"  # texture configurations, lights, blender
     "16i"  # color-combiner settings
     "i i i i"  # geoMode, other-low, other-high, flags
-    "4f 4f 4f 4f"  # prim, prim_lod, prim-depth, env, ambient
+    "4f 4f 4f 4f 4f 4f"  # prim, prim_lod, prim-depth, env, ambient, blend, fog
     "3f f 3f i 3f i"  # ck center, alpha clip, ck scale, light count, width, mipmap count
-    "6f 2i"  # k0-k5, tex size
+    "6f 2i 2f"  # k0-k5, tex size, fog pos
 )
 # version of the uniform buffer with all ints
 UNIFORM_BUFFER_MASK_STRUCT = struct.Struct(UNIFORM_BUFFER_STRUCT.format.replace("f", "I").replace("i", "I"))
@@ -208,13 +208,19 @@ class F64Rendermode:
     blend: str = "NONE"
     depth_test: str = "LESS_EQUAL"
     depth_write: bool = True
-    alpha_clip: float = -1
+    alpha_clip: float = None
 
 
 @dataclass
 class F64Light:
-    color: F64Color = (0, 0, 0, 0)
+    color: F64Color | None = None
     direction: tuple[float, float, float] | None = None
+
+
+@dataclass
+class F64Fog:
+    color: F64Color = None
+    pos: tuple[float, float] = None
 
 
 @dataclass
@@ -226,16 +232,18 @@ class F64RenderState:
     prim_color: F64Color | None = None
     prim_lod: tuple[float, float] | None = None
     env_color: F64Color | None = None
+    blend_color: F64Color | None = None
+    fog: F64Fog = dataclasses.field(default_factory=F64Fog)
     ck: tuple[float, float, float, float, float, float, float, float] | None = None
     convert: tuple[float, float, float, float, float, float] | None = None
     cc: tuple[
         float, float, float, float, float, float, float, float, float, float, float, float, float, float, float, float
     ] | None = None
     render_mode: F64Rendermode | None = None
-    flags: int = 0
-    geo_mode: int = 0
-    othermode_l: int = 0
-    othermode_h: int = 0
+    flags: int = None
+    geo_mode: int = None
+    othermode_l: int = None
+    othermode_h: int = None
     prim_depth: tuple[float, float] = None
     tex_size: tuple[int, int] = None
     mip_count: int = None
@@ -248,6 +256,7 @@ class F64RenderState:
             self.lights = [None] * 8
         if self.tex_confs is None:
             self.tex_confs = [None] * 8
+        self.save_cache()
 
     def save_cache(self):
         self.cached_values = self.np_array(False)
@@ -289,10 +298,12 @@ class F64RenderState:
             else:
                 tex_data.extend(mask(t.values, 9))
 
-        blender, alpha_clip, flags = None, -1, self.flags
+        blender, alpha_clip, flags = None, None, self.flags
         if self.render_mode is not None:
             blender = self.render_mode.blender
             alpha_clip = self.render_mode.alpha_clip
+            if flags is None:
+                flags = 0
             flags |= self.render_mode.flags
 
         ck = self.ck
@@ -314,6 +325,8 @@ class F64RenderState:
                 *mask(self.prim_depth, 2),
                 *mask(self.env_color, 4),
                 *mask(self.ambient_color, 4),
+                *mask(self.fog.color, 4),
+                *mask(self.blend_color, 4),
                 *mask(ck[:3], 3),
                 mask_single(alpha_clip),
                 *mask(ck[3:6], 3),
@@ -322,6 +335,7 @@ class F64RenderState:
                 mask_single(self.mip_count),
                 *mask(self.convert, 6),
                 *mask(self.tex_size, 2),
+                *mask(self.fog.pos, 2),
             ),
             dtype=np.uint64,
         )
@@ -358,6 +372,7 @@ class F64RenderState:
 @dataclass
 class F64Material:
     state: F64RenderState = dataclasses.field(default_factory=F64RenderState)
+    use_area_fog: bool = False
     cull: str = "NONE"
     layer: int | str | None = None
 
@@ -401,6 +416,11 @@ def f64_material_parse(f3d_mat: "F3DMaterialProperty", always_set: bool, set_lig
         state.ck = tuple((*quantize_srgb(f3d_mat.key_center, False), *f3d_mat.key_scale, *f3d_mat.key_width))
     if always_set or (f3d_mat.set_k0_5 and cc_uses["Convert"]):
         state.convert = tuple(getattr(f3d_mat, f"k{i}") for i in range(0, 6))
+    if always_set or (f3d_mat.set_fog and f3d_mat.rdp_settings.using_fog):
+        f64mat.use_area_fog = f3d_mat.use_global_fog
+        state.fog = F64Fog(quantize_tuple(f3d_mat.fog_color, 8), tuple(f3d_mat.fog_position))
+    if always_set or f3d_mat.set_blend:
+        state.blend_color = quantize_srgb(f3d_mat.blend_color)
     if always_set or (cc_uses["Shade"] and rdp.g_lighting and f3d_mat.set_lights):
         state.ambient_color = quantize_srgb(f3d_mat.ambient_light_color, force_alpha=True)
         if f3d_mat.use_default_lighting:
