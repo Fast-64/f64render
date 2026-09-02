@@ -34,6 +34,9 @@ vec4 wrappedMirrorSample(const sampler2D tex, vec2 uv, const vec2 mask, const ve
   // clamp again (mask S/T), this is also done to avoid OOB texture access
   uv = mod(uv, min(texSize, mask));
 
+  // invert Y again
+  uv.y = texSize.y - uv.y - 1;
+
   return texelFetch(tex, ivec2(floor(uv)), 0);
 }
 
@@ -48,7 +51,8 @@ vec4 sampleSampler(in const sampler2D tex, in const TileConf tileConf, in vec2 u
   uvCoord = round(uvCoord * LOW_PRECISION) / LOW_PRECISION;
 #endif
 
-  uvCoord -= tileConf.low;
+  // invert Y again, but only for applying tile low
+  uvCoord -= tileConf.low * vec2(1.0, -1.0);
 
   const vec2 isClamp      = step(tileConf.mask, vec2(1.0)); // if mask is negated, clamp
   const vec2 isMirror     = step(tileConf.high, vec2(0.0)); // if high is negated, mirror
